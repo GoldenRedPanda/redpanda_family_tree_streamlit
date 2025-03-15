@@ -1,0 +1,2 @@
+streamlit==1.43.2
+streamlit-mermaid==0.3.0
