@@ -9,7 +9,7 @@ def clean_name(name):
     return re.sub(r'\s*\(.*?\).*', '', name) if name else ''
 
 def escape_mermaid(name):
-    #return name.replace("-", "\\-").replace(" ", "\\ ").replace("(", "\\(").replace(")", "\\)")
+    return name.replace("-", "\\-").replace(" ", "\\ ").replace("(", "\\(").replace(")", "\\)")
     return name
 
 def parse_birthdate(birthdate):
@@ -48,8 +48,9 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2)
     family_dict = {person['name']: person for person in family_data}
     
     def add_person_node(person):
-        #if person['image']:
-        #    return f"{person['name']}[\"![]({person['image']})\"]"
+        if person.get('image', ''):
+            img = person.get('image', '').split(',')[0]
+            return f"{person['name']}[{person['name']}<img src=\"{img}\"/>]"
         return f"{person['name']}"
     
     def add_ancestors(person_name, depth=0):
@@ -114,7 +115,7 @@ default_csv_path = "redpanda.csv"
 use_default = st.checkbox("Use default CSV file (family_data.csv in the same folder)", value=True)
 
 uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
-root_name = st.text_input("Root Name", "")
+root_name = st.text_input("Root Name", "ケンシン")
 parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
 child_depth = st.number_input("Child Generation Depth", min_value=1, value=2)
 
