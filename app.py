@@ -4,6 +4,23 @@ import streamlit as st
 from datetime import datetime
 import os
 from streamlit_mermaid import st_mermaid
+from collections import OrderedDict
+
+class OrderedSet:
+    def __init__(self):
+        self.data = OrderedDict()
+
+    def add(self, item):
+        self.data[item] = None  # 値は不要
+
+    def __contains__(self, item):
+        return item in self.data
+
+    def __iter__(self):
+        return iter(self.data.keys())
+
+    def __repr__(self):
+        return f"OrderedSet({list(self.data.keys())})"
 
 def clean_name(name):
     return re.sub(r'\s*\(.*?\).*', '', name) if name else ''
@@ -41,16 +58,19 @@ def sort_children(children):
     
     return sorted(children, key=sort_key)
 
-def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2):
+def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2, show_images=False):
     mermaid_code = "graph TD;\n"
-    connections = set()
+    connections = OrderedSet()
     
     family_dict = {person['name']: person for person in family_data}
     
     def add_person_node(person):
         if person.get('image', ''):
             img = person.get('image', '').split(',')[0]
-            return f"{person['name']}[{person['name']}<img src=\"{img}\"/>]"
+            if show_images:
+                return f"{person['name']}[{person['name']}<img src=\"{img}\" />]"
+            else:
+                return f"{person['name']}[{person['name']}]"
         return f"{person['name']}"
     
     def add_ancestors(person_name, depth=0):
@@ -101,10 +121,10 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2)
     if root_name:
         add_ancestors(root_name)
         add_descendants(root_name)
-    else:
-        for person in family_data:
-            add_ancestors(person['name'])
-            add_descendants(person['name'])
+    #else:
+    #    for person in family_data:
+    #        add_ancestors(person['name'])
+    #        add_descendants(person['name'])
     
     mermaid_code += "\n".join(connections)
     return mermaid_code
@@ -113,9 +133,10 @@ st.title("Family Tree Generator")
 
 default_csv_path = "redpanda.csv"
 use_default = st.checkbox("Use default CSV file (family_data.csv in the same folder)", value=True)
+show_images = st.checkbox("Show Images", value=False)
 
 uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
-root_name = st.text_input("Root Name", "ケンシン")
+#root_name = st.text_input("Root Name", "ケンシン")
 parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
 child_depth = st.number_input("Child Generation Depth", min_value=1, value=2)
 
@@ -126,7 +147,9 @@ elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
 if data:
-    mermaid_code = generate_mermaid(data, root_name if root_name else None, parent_depth, child_depth)
+    name_options = [person['name'] for person in data]
+    root_name = st.selectbox("Root Name", [""] + name_options)
+    mermaid_code = generate_mermaid(data, root_name if root_name else None, parent_depth, child_depth, show_images)
     st.text_area("Generated Mermaid Code", mermaid_code, height=300)
     st_mermaid(mermaid_code)
 
