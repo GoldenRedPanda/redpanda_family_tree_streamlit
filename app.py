@@ -1,10 +1,36 @@
 import csv
 import re
 import streamlit as st
+import zlib
+import base64
+import urllib.parse
+import numpy as np
 from datetime import datetime
 import os
 from streamlit_mermaid import st_mermaid
 from collections import OrderedDict
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, date
+from urllib.parse import urlparse
+
+def is_url(string):
+    try:
+        result = urlparse(string)
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False
+
+def mermaid_to_pako_url(mermaid_code: str) -> str:
+    # gzip 圧縮（zlib形式 + headerなし + 最小サイズ）
+    compressed = zlib.compress(mermaid_code.encode('utf-8'), level=9)[2:-4]
+
+    # base64url エンコード
+    encoded = base64.urlsafe_b64encode(compressed).decode('utf-8')
+
+    # Mermaid Live Editor のURLに付加
+    url = f"https://mermaid.live/edit#pako:{encoded}"
+    return url
 
 class OrderedSet:
     def __init__(self):
@@ -67,7 +93,7 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
     def add_person_node(person):
         if person.get('image', ''):
             img = person.get('image', '').split(',')[0]
-            if show_images:
+            if show_images and is_url(img):
                 return f"{person['name']}[{person['name']}<img src=\"{img}\" />]"
             else:
                 return f"{person['name']}[{person['name']}]"
@@ -133,23 +159,88 @@ st.title("Family Tree Generator")
 
 default_csv_path = "redpanda.csv"
 use_default = st.checkbox("Use default CSV file (family_data.csv in the same folder)", value=True)
-show_images = st.checkbox("Show Images", value=False)
-
 uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
-#root_name = st.text_input("Root Name", "ケンシン")
-parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
-child_depth = st.number_input("Child Generation Depth", min_value=1, value=2)
-
 data = None
 if use_default and os.path.exists(default_csv_path):
     data = read_csv(default_csv_path)
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-if data:
-    name_options = [person['name'] for person in data]
-    root_name = st.selectbox("Root Name", [""] + name_options)
-    mermaid_code = generate_mermaid(data, root_name if root_name else None, parent_depth, child_depth, show_images)
-    st.text_area("Generated Mermaid Code", mermaid_code, height=300)
-    st_mermaid(mermaid_code)
+tr, ppy = st.tabs(["Family Tree", "Population Pyramid"])
+with tr:
+    show_images = st.checkbox("Show Images", value=False)
+    parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
+    child_depth = st.number_input("Child Generation Depth", min_value=1, value=2)
+    
+    if data:
+        name_options = [person['name'] for person in data]
+        root_name = st.selectbox("Root Name", [""] + name_options)
+        mermaid_code = generate_mermaid(data, root_name if root_name else None, parent_depth, child_depth, show_images)
+        st.text_area("Generated Mermaid Code", mermaid_code, height=300)
+        url = mermaid_to_pako_url(mermaid_code)
+        st.markdown(f"[Mermaid Live Editor で開く]({url})", unsafe_allow_html=True)
+        st_mermaid(mermaid_code)
+with ppy:
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    sel_date = st.date_input("日付を選んでください", date.today(), min_value=date(2005, 1, 1), max_value=date.today())
+    df = df[~df['cur_zoo'].isin(['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ'])]
+    live_df = df[df['deaddate'].isnull()].copy()
+    dead_df = df[~df['deaddate'].isnull()].copy()
+    # 日付の変換とデータのクレンジング
+    def convert_date(date_str):
+        try:
+          if type(date_str) is str:
+            return datetime.strptime(date_str, '%Y年%m月%d日').date()
+          else:
+            return date(1980, 1, 1)
+        except ValueError:
+          return date(1980, 1, 1)
+    
+    live_df['birthdate'] = pd.to_datetime(live_df['birthdate'].apply(convert_date))
+    live_df['deaddate'] = pd.to_datetime(live_df['deaddate'].apply(convert_date))
+    dead_df['birthdate'] = pd.to_datetime(dead_df['birthdate'].apply(convert_date))
+    dead_df['deaddate'] = pd.to_datetime(dead_df['deaddate'].apply(convert_date))
+
+    
+    # 2003年1月1日以降のデータのみ抽出
+    live_df = live_df[live_df['birthdate'] >= pd.Timestamp('2003-01-01')]
+    
+    # 年齢の計算
+    today = pd.Timestamp(sel_date)
+    sel_df = live_df[today > live_df['birthdate']]
+    sel_df = pd.concat([sel_df, dead_df[(today>dead_df['birthdate'])&(today<dead_df['deaddate'])]])
+    sel_df['age'] = (today - sel_df['birthdate']).dt.days // 365
+    # 年齢ビン（0歳〜24歳の25区分）
+    bins = list(range(0, 25)) + [100]  # 24歳以上も含める
+    
+    # ヒストグラム用にカウント
+    male_counts, _ = np.histogram(sel_df[sel_df['gender'] == 'オス']['age'], bins=bins)
+    female_counts, _ = np.histogram(sel_df[sel_df['gender'] == 'メス']['age'], bins=bins)
+    
+    # 各ビンの中心位置（0〜24歳）
+    bin_centers = list(range(0, 25))
+    n_panda = len(sel_df)
+    # Streamlit タイトル
+    st.title(f"人口ピラミッド {n_panda}頭")
+    
+    # Matplotlib でピラミッドグラフを作成
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.barh(bin_centers, -male_counts, height=0.8, label='Male', color='skyblue')
+    ax.barh(bin_centers, female_counts, height=0.8, label='Female', color='lightpink')
+    
+    ax.set_yticks(bin_centers)
+    ax.set_yticklabels([str(age) for age in bin_centers])
+    ax.set_xlabel('Population')
+    ax.set_title('Population Pyramid')
+    ax.grid(True)
+    ax.legend()
+    
+    ax.set_xticks(range(-max(male_counts), max(female_counts) + 1))
+    ax.set_xticklabels([abs(x) for x in range(-max(male_counts), max(female_counts) + 1)])
+    
+    st.pyplot(fig)
 
