@@ -10,8 +10,9 @@ import os
 from streamlit_mermaid import st_mermaid
 from collections import OrderedDict
 import pandas as pd
+import japanize_matplotlib
 import matplotlib.pyplot as plt
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from urllib.parse import urlparse
 
 def is_url(string):
@@ -155,6 +156,69 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
     mermaid_code += "\n".join(connections)
     return mermaid_code
 
+def create_gantt_chart(tasks, zoo_name):
+    """
+    Create a Gantt chart from a list of tasks.
+    Each task should be a dictionary with 'Task', 'Start', 'End', and 'Status' keys.
+    """
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    # Sort tasks by start date
+    tasks = sorted(tasks, key=lambda x: x['Start'])
+    
+    # Create y-axis labels (task names)
+    y_labels = [task['Task'] for task in tasks]
+    
+    # Calculate task durations
+    durations = [(task['End'] - task['Start']).days for task in tasks]
+    print(durations)
+    
+    # Calculate start positions (days from the earliest start date)
+    min_start = min(task['Start'] for task in tasks)
+    start_positions = [(task['Start'] - min_start).days for task in tasks]
+    
+    # Define colors based on status
+    colors = {
+        'Dead': 'lightgray',
+        'Live': 'lightgreen',
+    }
+    
+    # Create horizontal bars
+    bars = ax.barh(y_labels, durations, left=start_positions, 
+                  color=[colors.get(task['Status'], 'lightgray') for task in tasks])
+    
+    # Add task labels
+    for i, bar in enumerate(bars):
+        width = bar.get_width()
+        ax.text(bar.get_x() + width/2, bar.get_y() + bar.get_height()/2,
+                f"{tasks[i]['Status']}", ha='center', va='center')
+    
+    # Set x-axis to show dates
+    date_range = (min_start, max(task['End'] for task in tasks))
+    date_delta = (date_range[1] - date_range[0]).days
+    
+    # Generate date ticks every year
+    current_date = min_start
+    date_ticks = []
+    while current_date <= date_range[1]:
+        date_ticks.append(current_date)
+        # Add 1 year (365 days)
+        current_date = current_date + timedelta(days=365)
+    
+    ax.set_xticks([(d - min_start).days for d in date_ticks])
+    ax.set_xticklabels([d.strftime('%Y-%m-%d') for d in date_ticks], rotation=45)
+    
+    # Add grid and labels
+    ax.grid(True, axis='x')
+    ax.set_xlabel('Date')
+    ax.set_ylabel('Name')
+    ax.set_title(f'Gantt Chart of {zoo_name}')
+    
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
+    
+    return fig
+
 st.title("Family Tree Generator")
 
 default_csv_path = "redpanda.csv"
@@ -166,7 +230,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy = st.tabs(["Family Tree", "Population Pyramid"])
+tr, ppy, gantt = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -243,4 +307,75 @@ with ppy:
     ax.set_xticklabels([abs(x) for x in range(-max(male_counts), max(female_counts) + 1)])
     
     st.pyplot(fig)
+
+with gantt:
+    st.title("Project Gantt Chart")
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    live_df = df[df['deaddate'].isnull()].copy()
+    dead_df = df[~df['deaddate'].isnull()].copy()
+    # 日付の変換とデータのクレンジング
+    def convert_date(date_str):
+        try:
+          if type(date_str) is str:
+            return datetime.strptime(date_str, '%Y年%m月%d日').date()
+          else:
+            return date.today()
+        except ValueError:
+          return date(1980, 1, 1)
+    
+    live_df['birthdate'] = pd.to_datetime(live_df['birthdate'].apply(convert_date))
+    live_df['deaddate'] = pd.to_datetime(live_df['deaddate'].apply(convert_date))
+    dead_df['birthdate'] = pd.to_datetime(dead_df['birthdate'].apply(convert_date))
+    dead_df['deaddate'] = pd.to_datetime(dead_df['deaddate'].apply(convert_date))
+
+    
+    # 2003年1月1日以降のデータのみ抽出
+    live_df = live_df[live_df['birthdate'] >= pd.Timestamp('2003-01-01')]
+    
+    df = pd.concat([live_df, dead_df])
+    zoo_options = list(df['birth_zoo'].unique())
+    zoo_name = st.selectbox("Zoo Name", [""] + zoo_options)
+
+    df = df[df['birth_zoo'] == zoo_name]
+    # Use the DataFrame columns for the Gantt chart
+    if df.shape[0] > 0:
+        # Convert DataFrame to tasks format
+        tasks = []
+        for _, row in df.iterrows():
+            if pd.notna(row['birthdate']) and pd.notna(row['deaddate']):
+                # Determine status based on end date
+                status = "Live" if row['deaddate'].date() == date.today() else "Dead"
+                tasks.append({
+                    'Task': row['name'],
+                    'Start': row['birthdate'].date(),
+                    'End': row['deaddate'].date(),
+                    'Status': status
+                })
+        
+        if tasks:
+            print(tasks)
+            # Create and display the Gantt chart
+            gantt_fig = create_gantt_chart(tasks, zoo_name)
+            st.pyplot(gantt_fig)
+            
+            # Add explanation
+            st.markdown("""
+            ### Gantt Chart Explanation
+            
+            This Gantt chart shows the timeline of each individual:
+            
+            - **Tasks**: Individual names (y-axis)
+            - **Timeline**: Birth date to death date (x-axis)
+            - **Status**: 'Live' for individuals alive today, 'Dead' for individuals deceased
+            
+            The chart visualizes the lifespan of each individual from their birth date to death date.
+            """)
+        else:
+            st.warning("No valid data available for the Gantt chart. Please ensure the data contains birth and death dates.")
+    else:
+        st.warning("Please upload a CSV file or use the default file to view the Gantt chart.")
 
