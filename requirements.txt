@@ -1,4 +1,5 @@
 streamlit==1.43.2
 streamlit-mermaid==0.3.0
 matplotlib==3.8.2
+networkx==3.2.1
 japanize-matplotlib==1.1.3

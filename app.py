@@ -14,6 +14,7 @@ import japanize_matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime, date, timedelta
 from urllib.parse import urlparse
+import networkx as nx
 
 def is_url(string):
     try:
@@ -50,7 +51,11 @@ class OrderedSet:
         return f"OrderedSet({list(self.data.keys())})"
 
 def clean_name(name):
-    return re.sub(r'\s*\(.*?\).*', '', name) if name else ''
+    if pd.isna(name) or name is None:
+        return ''
+    if isinstance(name, float):
+        return ''
+    return re.sub(r'\s*\(.*?\).*', '', str(name)) if name else ''
 
 def escape_mermaid(name):
     return name.replace("-", "\\-").replace(" ", "\\ ").replace("(", "\\(").replace(")", "\\)")
@@ -219,6 +224,71 @@ def create_gantt_chart(tasks, zoo_name):
     
     return fig
 
+def find_oldest_ancestors(df, individual_name):
+    """
+    Find the oldest ancestors for a given individual using a directed graph.
+    Returns a list of tuples (ancestor_name, weight) where weight is based on generation level.
+    """
+    # Create a directed graph
+    G = nx.DiGraph()
+    
+    # Add edges from parents to children
+    for _, row in df.iterrows():
+        if pd.notna(row['father']):
+            G.add_edge(row['father'], row['name'])
+        if pd.notna(row['mother']):
+            G.add_edge(row['mother'], row['name'])
+    
+    # Find all ancestors using networkx
+    ancestors = nx.ancestors(G, individual_name)
+    
+    # Find the oldest ancestors (those with no parents in the dataset)
+    oldest_ancestors = []
+    for ancestor in ancestors:
+        if ancestor == '':
+            continue
+        # Check if this ancestor has any parents in the dataset
+        has_parents = False
+        for _, row in df.iterrows():
+            if row['name'] == ancestor:
+                if row['father'] != '' or row['mother'] != '':
+                    has_parents = True
+                break
+        if not has_parents:
+            # Calculate the weight based on the shortest path length (generation level)
+            path_length = len(nx.shortest_path(G, ancestor, individual_name)) - 1
+            weight = 0.5 ** path_length
+            oldest_ancestors.append((ancestor, weight))
+    
+    return oldest_ancestors
+
+def plot_genetic_distribution(df, ancestors):
+    """
+    Plot the genetic distribution of the oldest ancestors with weights.
+    """
+    # Count the weighted number of ancestors from each zoo
+    zoo_counts = {}
+    for ancestor, weight in ancestors:
+        ancestor_data = df[df['name'] == ancestor]
+        if not ancestor_data.empty:
+            birth_zoo = ancestor_data.iloc[0]['cur_zoo']
+            zoo_counts[birth_zoo] = zoo_counts.get(birth_zoo, 0) + weight
+    
+    # Create a pie chart
+    fig, ax = plt.subplots(figsize=(10, 8))
+    if zoo_counts:
+        labels = list(zoo_counts.keys())
+        sizes = list(zoo_counts.values())
+        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+        ax.axis('equal')
+        ax.set_title('Weighted Genetic Distribution of Oldest Ancestors')
+    else:
+        ax.text(0.5, 0.5, 'No ancestor data available', 
+                horizontalalignment='center', verticalalignment='center')
+        ax.set_title('Genetic Distribution')
+    
+    return fig
+
 st.title("Family Tree Generator")
 
 default_csv_path = "redpanda.csv"
@@ -230,7 +300,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart"])
+tr, ppy, gantt, genetic = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -378,4 +448,40 @@ with gantt:
             st.warning("No valid data available for the Gantt chart. Please ensure the data contains birth and death dates.")
     else:
         st.warning("Please upload a CSV file or use the default file to view the Gantt chart.")
+
+with genetic:
+    st.title("Genetic Distribution of Oldest Ancestors")
+    
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    df['father'] = df['father'].apply(clean_name)
+    df['mother'] = df['mother'].apply(clean_name)
+    
+    # Use the same DataFrame as in the Gantt chart tab
+    if df.shape[0] > 0:
+        # Select an individual
+        individual_options = list(df['name'].unique())
+        selected_individual = st.selectbox("Select Individual", [""] + individual_options)
+        
+        if selected_individual:
+            # Find the oldest ancestors
+            oldest_ancestors = find_oldest_ancestors(df, selected_individual)
+            
+            if oldest_ancestors:
+                st.write(f"Oldest ancestors for {selected_individual}:")
+                for ancestor, weight in oldest_ancestors:
+                    st.write(f"- {ancestor} (Weight: {weight:.4f})")
+                
+                # Plot the genetic distribution
+                genetic_fig = plot_genetic_distribution(df, oldest_ancestors)
+                st.pyplot(genetic_fig)
+            else:
+                st.warning(f"No ancestors found for {selected_individual}")
+        else:
+            st.info("Please select an individual to view their genetic distribution")
+    else:
+        st.warning("No data available for genetic distribution analysis")
 
