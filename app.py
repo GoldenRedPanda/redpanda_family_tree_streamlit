@@ -164,7 +164,7 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
 def create_gantt_chart(tasks, zoo_name):
     """
     Create a Gantt chart from a list of tasks.
-    Each task should be a dictionary with 'Task', 'Start', 'End', and 'Status' keys.
+    Each task should be a dictionary with 'Task', 'Start', 'End', 'Status', and 'Zoo' keys.
     """
     fig, ax = plt.subplots(figsize=(12, 6))
     
@@ -176,27 +176,25 @@ def create_gantt_chart(tasks, zoo_name):
     
     # Calculate task durations
     durations = [(task['End'] - task['Start']).days for task in tasks]
-    print(durations)
     
     # Calculate start positions (days from the earliest start date)
     min_start = min(task['Start'] for task in tasks)
     start_positions = [(task['Start'] - min_start).days for task in tasks]
     
-    # Define colors based on status
-    colors = {
-        'Dead': 'lightgray',
-        'Live': 'lightgreen',
-    }
+    # Define colors based on zoo
+    unique_zoos = sorted(set(task['Zoo'] for task in tasks))
+    colors = plt.cm.Set3(np.linspace(0, 1, len(unique_zoos)))
+    zoo_colors = dict(zip(unique_zoos, colors))
     
     # Create horizontal bars
     bars = ax.barh(y_labels, durations, left=start_positions, 
-                  color=[colors.get(task['Status'], 'lightgray') for task in tasks])
+                  color=[zoo_colors[task['Zoo']] for task in tasks])
     
     # Add task labels
     for i, bar in enumerate(bars):
         width = bar.get_width()
         ax.text(bar.get_x() + width/2, bar.get_y() + bar.get_height()/2,
-                f"{tasks[i]['Status']}", ha='center', va='center')
+                f"{tasks[i]['Zoo']}", ha='center', va='center')
     
     # Set x-axis to show dates
     date_range = (min_start, max(task['End'] for task in tasks))
@@ -217,7 +215,11 @@ def create_gantt_chart(tasks, zoo_name):
     ax.grid(True, axis='x')
     ax.set_xlabel('Date')
     ax.set_ylabel('Name')
-    ax.set_title(f'Gantt Chart of {zoo_name}')
+    ax.set_title(f'Zoo Transitions for {zoo_name}')
+    
+    # Add legend for zoos
+    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=color) for color in colors]
+    ax.legend(legend_elements, unique_zoos, title='Zoos', loc='upper right')
     
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
@@ -396,38 +398,99 @@ with gantt:
             return date.today()
         except ValueError:
           return date(1980, 1, 1)
+    def convert_date_through(date_str):
+        try:
+          if type(date_str) is str:
+            return datetime.strptime(date_str, '%Y年%m月%d日').date()
+          else:
+            return None
+        except ValueError:
+          return None
     
     live_df['birthdate'] = pd.to_datetime(live_df['birthdate'].apply(convert_date))
     live_df['deaddate'] = pd.to_datetime(live_df['deaddate'].apply(convert_date))
+    live_df['move_date1'] = pd.to_datetime(live_df['move_date1'].apply(convert_date_through))
+    live_df['move_date2'] = pd.to_datetime(live_df['move_date2'].apply(convert_date_through))
+    live_df['move_date3'] = pd.to_datetime(live_df['move_date3'].apply(convert_date_through))
     dead_df['birthdate'] = pd.to_datetime(dead_df['birthdate'].apply(convert_date))
     dead_df['deaddate'] = pd.to_datetime(dead_df['deaddate'].apply(convert_date))
+    dead_df['move_date1'] = pd.to_datetime(dead_df['move_date1'].apply(convert_date_through))
+    dead_df['move_date2'] = pd.to_datetime(dead_df['move_date2'].apply(convert_date_through))
+    dead_df['move_date3'] = pd.to_datetime(dead_df['move_date3'].apply(convert_date_through))
 
-    
     # 2003年1月1日以降のデータのみ抽出
     live_df = live_df[live_df['birthdate'] >= pd.Timestamp('2003-01-01')]
     
     df = pd.concat([live_df, dead_df])
-    zoo_options = list(df['birth_zoo'].unique())
-    zoo_name = st.selectbox("Zoo Name", [""] + zoo_options)
+    zoo_options = list(set(df['birth_zoo'].unique()) | set(df['move_zoo1'].dropna().unique()) | 
+                      set(df['move_zoo2'].dropna().unique()) | set(df['move_zoo3'].dropna().unique()))
+    zoo_name = st.selectbox("Zoo Name", [""] + sorted(zoo_options))
 
-    df = df[df['birth_zoo'] == zoo_name]
-    # Use the DataFrame columns for the Gantt chart
-    if df.shape[0] > 0:
-        # Convert DataFrame to tasks format
+    if zoo_name:
+        # Convert DataFrame to tasks format with zoo transitions
         tasks = []
         for _, row in df.iterrows():
-            if pd.notna(row['birthdate']) and pd.notna(row['deaddate']):
-                # Determine status based on end date
-                status = "Live" if row['deaddate'].date() == date.today() else "Dead"
-                tasks.append({
-                    'Task': row['name'],
-                    'Start': row['birthdate'].date(),
-                    'End': row['deaddate'].date(),
-                    'Status': status
-                })
+            if pd.notna(row['birthdate']):
+                # Check birth zoo period
+                if row['birth_zoo'] == zoo_name:
+                    start_date = row['birthdate'].date()
+                    end_date = row['move_date1'].date() if pd.notna(row['move_date1']) else row['deaddate'].date()
+                    exist_live = (live_df['name'] == row['name']).any()
+                    if exist_live:
+                        to_zoo  = row['move_zoo1'] if pd.notna(row['move_zoo1']) else 'live'
+                    else:
+                        to_zoo  = row['move_zoo1'] if pd.notna(row['move_zoo1']) else 'dead'
+                    tasks.append({
+                        'Task': row['name'],
+                        'Start': start_date,
+                        'End': end_date,
+                        'Zoo': to_zoo
+                    })
+                
+                # Check first move period
+                if pd.notna(row['move_date1']) and pd.notna(row['move_zoo1']) and row['move_zoo1'] == zoo_name:
+                    start_date = row['move_date1'].date()
+                    end_date = row['move_date2'].date() if pd.notna(row['move_date2']) else row['deaddate'].date()
+                    exist_live = (live_df['name'] == row['name']).any()
+                    if exist_live:
+                        to_zoo  = row['move_zoo2'] if pd.notna(row['move_zoo2']) else 'live'
+                    else:
+                        to_zoo  = row['move_zoo2'] if pd.notna(row['move_zoo2']) else 'dead'
+                    tasks.append({
+                        'Task': row['name'],
+                        'Start': start_date,
+                        'End': end_date,
+                        'Zoo': to_zoo
+                    })
+                
+                # Check second move period
+                if pd.notna(row['move_date2']) and pd.notna(row['move_zoo2']) and row['move_zoo2'] == zoo_name:
+                    start_date = row['move_date2'].date()
+                    end_date = row['move_date3'].date() if pd.notna(row['move_date3']) else row['deaddate'].date()
+                    exist_live = (live_df['name'] == row['name']).any()
+                    if exist_live:
+                        to_zoo  = row['move_zoo3'] if pd.notna(row['move_zoo3']) else 'live'
+                    else:
+                        to_zoo  = row['move_zoo3'] if pd.notna(row['move_zoo3']) else 'dead'
+                    tasks.append({
+                        'Task': row['name'],
+                        'Start': start_date,
+                        'End': end_date,
+                        'Zoo': to_zoo
+                    })
+                
+                # Check third move period
+                if pd.notna(row['move_date3']) and pd.notna(row['move_zoo3']) and row['move_zoo3'] == zoo_name:
+                    start_date = row['move_date3'].date()
+                    end_date = row['deaddate'].date()
+                    tasks.append({
+                        'Task': row['name'],
+                        'Start': start_date,
+                        'End': end_date,
+                        'Zoo': row['move_zoo3']
+                    })
         
         if tasks:
-            print(tasks)
             # Create and display the Gantt chart
             gantt_fig = create_gantt_chart(tasks, zoo_name)
             st.pyplot(gantt_fig)
@@ -436,18 +499,18 @@ with gantt:
             st.markdown("""
             ### Gantt Chart Explanation
             
-            This Gantt chart shows the timeline of each individual:
+            This Gantt chart shows the periods when individuals were at the selected zoo:
             
             - **Tasks**: Individual names (y-axis)
-            - **Timeline**: Birth date to death date (x-axis)
-            - **Status**: 'Live' for individuals alive today, 'Dead' for individuals deceased
+            - **Timeline**: Periods when individuals were at the selected zoo (x-axis)
+            - **Segments**: Each segment represents a continuous period at the selected zoo
             
-            The chart visualizes the lifespan of each individual from their birth date to death date.
+            The chart visualizes when each individual was present at the selected zoo, whether they were born there or moved there later in life.
             """)
         else:
-            st.warning("No valid data available for the Gantt chart. Please ensure the data contains birth and death dates.")
+            st.warning(f"No individuals found who were at {zoo_name} at any point in their lives.")
     else:
-        st.warning("Please upload a CSV file or use the default file to view the Gantt chart.")
+        st.warning("Please select a zoo to view the Gantt chart.")
 
 with genetic:
     st.title("Genetic Distribution of Oldest Ancestors")
