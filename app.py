@@ -302,7 +302,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution"])
+tr, ppy, gantt, genetic, death_age = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -547,4 +547,142 @@ with genetic:
             st.info("Please select an individual to view their genetic distribution")
     else:
         st.warning("No data available for genetic distribution analysis")
+
+with death_age:
+    st.title("Death Age Distribution")
+    
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    
+    # 日付の変換とデータのクレンジング
+    def convert_date(date_str):
+        try:
+            if type(date_str) is str:
+                return datetime.strptime(date_str, '%Y年%m月%d日').date()
+            else:
+                return None
+        except ValueError:
+            return None
+    
+    # 死亡日と誕生日を日付型に変換
+    df['birthdate'] = pd.to_datetime(df['birthdate'].apply(convert_date))
+    df['deaddate'] = pd.to_datetime(df['deaddate'].apply(convert_date))
+    
+    # 死亡日が存在するデータのみを抽出
+    death_df = df[df['deaddate'].notna()].copy()
+    
+    if not death_df.empty:
+        # 死亡時の年齢を計算
+        death_df['death_age'] = (death_df['deaddate'] - death_df['birthdate']).dt.days / 365.25
+        
+        # ヒストグラムの作成
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # 年齢の範囲を設定（0歳から最大年齢まで）
+        max_age = int(death_df['death_age'].max()) + 1
+        bins = range(0, max_age + 1)
+        
+        # 性別ごとにヒストグラムを作成
+        male_data = death_df[death_df['gender'] == 'オス']['death_age']
+        female_data = death_df[death_df['gender'] == 'メス']['death_age']
+        
+        ax.hist([male_data, female_data], bins=bins, alpha=0.7, label=['Male', 'Female'], color=['skyblue', 'lightpink'])
+        
+        # グラフの装飾
+        ax.set_xlabel('Age at Death (years)')
+        ax.set_ylabel('Count')
+        ax.set_title('Distribution of Death Ages')
+        ax.legend()
+        ax.grid(True)
+        
+        # 統計情報の表示
+        st.write("### Statistics")
+        st.write(f"Total number of deaths: {len(death_df)}")
+        st.write(f"Average age at death: {death_df['death_age'].mean():.1f} years")
+        st.write(f"Median age at death: {death_df['death_age'].median():.1f} years")
+        st.write(f"Maximum age at death: {death_df['death_age'].max():.1f} years")
+        
+        # 性別ごとの統計情報
+        st.write("### Statistics by Gender")
+        male_stats = death_df[death_df['gender'] == 'オス']['death_age']
+        female_stats = death_df[death_df['gender'] == 'メス']['death_age']
+        
+        st.write("**Male**")
+        st.write(f"- Count: {len(male_stats)}")
+        st.write(f"- Average age: {male_stats.mean():.1f} years")
+        st.write(f"- Median age: {male_stats.median():.1f} years")
+        
+        st.write("**Female**")
+        st.write(f"- Count: {len(female_stats)}")
+        st.write(f"- Average age: {female_stats.mean():.1f} years")
+        st.write(f"- Median age: {female_stats.median():.1f} years")
+        
+        # ヒストグラムの表示
+        st.pyplot(fig)
+
+        # 平均余命の計算とグラフ作成
+        st.write("### Life Expectancy by Current Age")
+        
+        # 各年齢での平均余命を計算
+        life_expectancy = []
+        current_ages = range(0, int(death_df['death_age'].max()) + 1)
+        
+        for age in current_ages:
+            # その年齢以上で死亡した個体を抽出
+            survived = death_df[death_df['death_age'] >= age]
+            if len(survived) > 0:
+                # 平均余命 = 平均死亡年齢 - 現在の年齢
+                avg_life_expectancy = survived['death_age'].mean() - age
+                life_expectancy.append(avg_life_expectancy)
+            else:
+                life_expectancy.append(0)
+        
+        # 性別ごとの平均余命を計算
+        male_life_expectancy = []
+        female_life_expectancy = []
+        
+        for age in current_ages:
+            male_survived = death_df[(death_df['death_age'] >= age) & (death_df['gender'] == 'オス')]
+            female_survived = death_df[(death_df['death_age'] >= age) & (death_df['gender'] == 'メス')]
+            
+            if len(male_survived) > 0:
+                male_life_expectancy.append(male_survived['death_age'].mean() - age)
+            else:
+                male_life_expectancy.append(0)
+                
+            if len(female_survived) > 0:
+                female_life_expectancy.append(female_survived['death_age'].mean() - age)
+            else:
+                female_life_expectancy.append(0)
+        
+        # 平均余命のグラフを作成
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        
+        ax2.plot(current_ages, life_expectancy, label='Overall', color='green', linewidth=2)
+        ax2.plot(current_ages, male_life_expectancy, label='Male', color='skyblue', linestyle='--')
+        ax2.plot(current_ages, female_life_expectancy, label='Female', color='lightpink', linestyle='--')
+        
+        ax2.set_xlabel('Current Age (years)')
+        ax2.set_ylabel('Life Expectancy (years)')
+        ax2.set_title('Life Expectancy by Current Age')
+        ax2.legend()
+        ax2.grid(True)
+        
+        # グラフの表示
+        st.pyplot(fig2)
+        
+        # 平均余命の説明
+        st.write("""
+        #### About Life Expectancy
+        - The graph shows the average remaining years of life for individuals at each age
+        - The overall line (green) shows the average for all individuals
+        - The dashed lines show the averages for males (blue) and females (pink)
+        - The life expectancy decreases as current age increases
+        - This is based on historical death data and may not predict future life expectancy
+        """)
+    else:
+        st.warning("No death records found in the dataset.")
 
