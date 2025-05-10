@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime, date, timedelta
 from urllib.parse import urlparse
 import networkx as nx
+import json
 
 def is_url(string):
     try:
@@ -23,16 +24,24 @@ def is_url(string):
     except ValueError:
         return False
 
-def mermaid_to_pako_url(mermaid_code: str) -> str:
-    # gzip 圧縮（zlib形式 + headerなし + 最小サイズ）
-    compressed = zlib.compress(mermaid_code.encode('utf-8'), level=9)[2:-4]
+def js_btoa(data):
+    return base64.b64encode(data)
 
-    # base64url エンコード
-    encoded = base64.urlsafe_b64encode(compressed).decode('utf-8')
+def pako_deflate(data):
+    compress = zlib.compressobj(9, zlib.DEFLATED, 15, 8, zlib.Z_DEFAULT_STRATEGY)
+    compressed_data = compress.compress(data)
+    compressed_data += compress.flush()
+    return compressed_data
 
-    # Mermaid Live Editor のURLに付加
-    url = f"https://mermaid.live/edit#pako:{encoded}"
-    return url
+def mermaid_to_pako_url(graphMarkdown: str):
+    jGraph = {"code": graphMarkdown, "mermaid": {"theme": "default"}}
+    byteStr = json.dumps(jGraph).encode('utf-8')
+    deflated = pako_deflate(byteStr)
+    dEncode = js_btoa(deflated)
+    link = 'http://mermaid.live/edit#pako:' + dEncode.decode('ascii')
+    return link
+
+
 
 class OrderedSet:
     def __init__(self):
@@ -96,14 +105,37 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
     
     family_dict = {person['name']: person for person in family_data}
     
+    def get_year_range(person):
+        birth_year = ''
+        death_year = ''
+        if person.get('birthdate'):
+            try:
+                birth_year = datetime.strptime(person['birthdate'], '%Y年%m月%d日').year
+            except:
+                pass
+        if person.get('deaddate'):
+            try:
+                death_year = datetime.strptime(person['deaddate'], '%Y年%m月%d日').year
+            except:
+                pass
+        if birth_year and death_year:
+            return f"{birth_year}-{death_year}"
+        elif birth_year:
+            return f"{birth_year}-"
+        return ""
+    
     def add_person_node(person):
+        gender = person.get('gender', 'オス')
+        year_range = get_year_range(person)
+        display_text = f"{person['name']}<br>{year_range}" if year_range else person['name']
+        
         if person.get('image', ''):
             img = person.get('image', '').split(',')[0]
             if show_images and is_url(img):
-                return f"{person['name']}[{person['name']}<img src=\"{img}\" />]"
+                return f"{person['name']}[{display_text}<br><img src=\"{img}\" />]:::gender_{gender}"
             else:
-                return f"{person['name']}[{person['name']}]"
-        return f"{person['name']}"
+                return f"{person['name']}[{display_text}]:::gender_{gender}"
+        return f"{person['name']}[{display_text}]:::gender_{gender}"
     
     def add_ancestors(person_name, depth=0):
         if person_name not in family_dict or depth >= parent_depth:
@@ -119,10 +151,12 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
             connections.add(f"{parent_node} --> {add_person_node(person)}")
         
         if father:
-            connections.add(f"{add_person_node({'name': father})} --> {parent_node}")
+            father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
+            connections.add(f"{add_person_node(father_data)} --> {parent_node}")
             add_ancestors(father, depth + 1)
         if mother:
-            connections.add(f"{add_person_node({'name': mother})} --> {parent_node}")
+            mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
+            connections.add(f"{add_person_node(mother_data)} --> {parent_node}")
             add_ancestors(mother, depth + 1)
     
     def add_descendants(person_name, depth=0):
@@ -140,12 +174,16 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
             if father and mother:
                 parent_node = f"{father}_{mother}"
                 connections.add(f"{parent_node}(( ))")  # 中間ノード
-                connections.add(f"{add_person_node({'name': father})} --> {parent_node}")
-                connections.add(f"{add_person_node({'name': mother})} --> {parent_node}")
+                father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
+                mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
+                connections.add(f"{add_person_node(father_data)} --> {parent_node}")
+                connections.add(f"{add_person_node(mother_data)} --> {parent_node}")
             else:
                 parent_node = f"{father or mother}_child"
                 connections.add(f"{parent_node}(( ))")  # 中間ノード
-                connections.add(f"{add_person_node({'name': father or mother})} --> {parent_node}")
+                parent_data = next((p for p in family_data if p['name'] == (father or mother)), 
+                                 {'name': father or mother, 'gender': 'オス' if father else 'メス'})
+                connections.add(f"{add_person_node(parent_data)} --> {parent_node}")
             
             connections.add(f"{parent_node} --> {add_person_node(child)}")
             add_descendants(child_name, depth + 1)
@@ -153,10 +191,10 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
     if root_name:
         add_ancestors(root_name)
         add_descendants(root_name)
-    #else:
-    #    for person in family_data:
-    #        add_ancestors(person['name'])
-    #        add_descendants(person['name'])
+    
+    # スタイル定義を追加
+    mermaid_code += "\nclassDef gender_オス stroke:blue,stroke-width:2px;\n"
+    mermaid_code += "classDef gender_メス stroke:pink,stroke-width:2px;\n"
     
     mermaid_code += "\n".join(connections)
     return mermaid_code
@@ -683,6 +721,57 @@ with death_age:
         - The life expectancy decreases as current age increases
         - This is based on historical death data and may not predict future life expectancy
         """)
+
+        # 死亡月の分布を表示
+        st.write("### Death Month Distribution")
+        
+        # 死亡月を抽出
+        death_df['death_month'] = death_df['deaddate'].dt.month
+        
+        # ヒストグラムの作成
+        fig3, ax3 = plt.subplots(figsize=(10, 6))
+        
+        # 性別ごとにヒストグラムを作成
+        male_month_data = death_df[death_df['gender'] == 'オス']['death_month']
+        female_month_data = death_df[death_df['gender'] == 'メス']['death_month']
+        
+        ax3.hist([male_month_data, female_month_data], bins=range(1, 14), alpha=0.7, 
+                label=['Male', 'Female'], color=['skyblue', 'lightpink'])
+        
+        # グラフの装飾
+        ax3.set_xlabel('Month')
+        ax3.set_ylabel('Number of Deaths')
+        ax3.set_title('Distribution of Deaths by Month')
+        ax3.set_xticks(range(1, 13))
+        ax3.set_xticklabels(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+        ax3.legend()
+        ax3.grid(True)
+        
+        # グラフの表示
+        st.pyplot(fig3)
+        
+        # 月ごとの統計情報
+        st.write("### Death Statistics by Month")
+        
+        # 全体的な月別死亡数
+        monthly_deaths = death_df['death_month'].value_counts().sort_index()
+        st.write("**Total deaths by month:**")
+        for month, count in monthly_deaths.items():
+            month_name = ['January', 'February', 'March', 'April', 'May', 'June',
+                         'July', 'August', 'September', 'October', 'November', 'December'][month-1]
+            st.write(f"- {month_name}: {count} deaths")
+        
+        # 性別ごとの月別死亡数
+        st.write("**Deaths by month and gender:**")
+        for month in range(1, 13):
+            month_name = ['January', 'February', 'March', 'April', 'May', 'June',
+                         'July', 'August', 'September', 'October', 'November', 'December'][month-1]
+            male_count = len(death_df[(death_df['death_month'] == month) & (death_df['gender'] == 'オス')])
+            female_count = len(death_df[(death_df['death_month'] == month) & (death_df['gender'] == 'メス')])
+            st.write(f"- {month_name}:")
+            st.write(f"  - Male: {male_count} deaths")
+            st.write(f"  - Female: {female_count} deaths")
     else:
         st.warning("No death records found in the dataset.")
 
