@@ -127,7 +127,8 @@ def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2,
     def add_person_node(person):
         gender = person.get('gender', 'オス')
         year_range = get_year_range(person)
-        display_text = f"{person['name']}<br>{year_range}" if year_range else person['name']
+        cur_zoo = person.get('cur_zoo', '')
+        display_text = f"{person['name']}<br>{cur_zoo}<br>{year_range}" if year_range else f"{person['name']}<br>{cur_zoo}"
         
         if person.get('image', ''):
             img = person.get('image', '').split(',')[0]
