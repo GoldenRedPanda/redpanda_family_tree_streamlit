@@ -341,7 +341,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram"])
+tr, ppy, gantt, genetic, death_age, relationship = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -775,4 +775,151 @@ with death_age:
             st.write(f"  - Female: {female_count} deaths")
     else:
         st.warning("No death records found in the dataset.")
+
+with relationship:
+    st.title("Relationship Analysis Between Two Individuals")
+    
+    if data:
+        # Convert data to DataFrame
+        df = pd.DataFrame(data)
+        
+        if df.shape[0] > 0:
+            # 個体名のリストを取得
+            individual_options = list(df['name'].unique())
+            
+            # 2つの個体を選択
+            col1, col2 = st.columns(2)
+            with col1:
+                individual1 = st.selectbox("Select First Individual", [""] + individual_options)
+            with col2:
+                individual2 = st.selectbox("Select Second Individual", [""] + individual_options)
+            
+            if individual1 and individual2:
+                if individual1 == individual2:
+                    st.warning("Please select two different individuals.")
+                else:
+                    # 関係を分析する関数
+                    def find_relationship_path(df, start_name, target_name):
+                        # キューと訪問済みセットを初期化
+                        queue = [(start_name, [start_name])]  # (現在のノード, パス)
+                        visited = {start_name}
+                        
+                        while queue:
+                            current_name, path = queue.pop(0)  # キューから最初の要素を取り出す
+                            
+                            # 目標の個体に到達した場合
+                            if current_name == target_name:
+                                return path
+                            
+                            # 現在の個体の情報を取得
+                            current = df[df['name'] == current_name].iloc[0]
+                            
+                            # 1. 親を探索（祖先方向）
+                            if pd.notna(current['father']) and current['father'] != '':
+                                father = current['father']
+                                if father in df['name'].values and father not in visited:
+                                    visited.add(father)
+                                    queue.append((father, path + [father]))
+                            
+                            if pd.notna(current['mother']) and current['mother'] != '':
+                                mother = current['mother']
+                                if mother in df['name'].values and mother not in visited:
+                                    visited.add(mother)
+                                    queue.append((mother, path + [mother]))
+                            
+                            # 2. 子を探索（子孫方向）
+                            children = df[(df['father'] == current_name) | (df['mother'] == current_name)]
+                            for _, child in children.iterrows():
+                                if child['name'] not in visited:
+                                    visited.add(child['name'])
+                                    queue.append((child['name'], path + [child['name']]))
+                            
+                            # 3. 兄弟姉妹を探索
+                            if pd.notna(current['father']) and current['father'] != '':
+                                siblings = df[df['father'] == current['father']]
+                                for _, sibling in siblings.iterrows():
+                                    if sibling['name'] != current_name and sibling['name'] not in visited:
+                                        visited.add(sibling['name'])
+                                        queue.append((sibling['name'], path + [sibling['name']]))
+                            
+                            if pd.notna(current['mother']) and current['mother'] != '':
+                                siblings = df[df['mother'] == current['mother']]
+                                for _, sibling in siblings.iterrows():
+                                    if sibling['name'] != current_name and sibling['name'] not in visited:
+                                        visited.add(sibling['name'])
+                                        queue.append((sibling['name'], path + [sibling['name']]))
+                        
+                        return None
+                    
+                    # 関係を探索
+                    relationship_path = find_relationship_path(df, individual1, individual2)
+                    
+                    
+                    if relationship_path:
+                        st.success(f"Relationship found between {individual1} and {individual2}!")
+                        
+                        # 関係を図示
+                        mermaid_code = "graph TD;\n"
+                        
+                        # ノードの追加
+                        for i, name in enumerate(relationship_path):
+                            if i == 0:
+                                mermaid_code += f"{name}[{name}]:::start;\n"
+                            elif i == len(relationship_path) - 1:
+                                mermaid_code += f"{name}[{name}]:::target;\n"
+                            else:
+                                mermaid_code += f"{name}[{name}];\n"
+                        
+                        # エッジの追加
+                        for i in range(len(relationship_path) - 1):
+                            current = df[df['name'] == relationship_path[i]].iloc[0]
+                            next_person = relationship_path[i + 1]
+                            next_person_data = df[df['name'] == next_person].iloc[0]
+                            
+                            # 親子関係の判定
+                            if current['father'] == next_person:
+                                mermaid_code += f"{relationship_path[i]} -->|father| {next_person};\n"
+                            elif current['mother'] == next_person:
+                                mermaid_code += f"{relationship_path[i]} -->|mother| {next_person};\n"
+                            elif next_person_data['father'] == relationship_path[i]:
+                                mermaid_code += f"{relationship_path[i]} -->|son| {next_person};\n"
+                            elif next_person_data['mother'] == relationship_path[i]:
+                                mermaid_code += f"{relationship_path[i]} -->|daughter| {next_person};\n"
+                            else:
+                                # 兄弟姉妹関係の場合
+                                if current['father'] == next_person_data['father'] or current['mother'] == next_person_data['mother']:
+                                    mermaid_code += f"{relationship_path[i]} ---|sibling| {next_person};\n"
+                        
+                        # スタイルの追加
+                        mermaid_code += "\nclassDef start fill:#f9f,stroke:#333,stroke-width:2px;\n"
+                        mermaid_code += "classDef target fill:#bbf,stroke:#333,stroke-width:2px;\n"
+                        
+                        # 図の表示
+                        st_mermaid(mermaid_code)
+                        
+                        # 関係の説明
+                        st.write("### Relationship Path")
+                        for i in range(len(relationship_path) - 1):
+                            current = df[df['name'] == relationship_path[i]].iloc[0]
+                            next_person = relationship_path[i + 1]
+                            next_person_data = df[df['name'] == next_person].iloc[0]
+                            
+                            if current['father'] == next_person:
+                                st.write(f"{relationship_path[i]}'s father is {next_person}")
+                            elif current['mother'] == next_person:
+                                st.write(f"{relationship_path[i]}'s mother is {next_person}")
+                            elif next_person_data['father'] == relationship_path[i]:
+                                st.write(f"{next_person} is {relationship_path[i]}'s son")
+                            elif next_person_data['mother'] == relationship_path[i]:
+                                st.write(f"{next_person} is {relationship_path[i]}'s daughter")
+                            else:
+                                # 兄弟姉妹関係の場合
+                                if current['father'] == next_person_data['father'] or current['mother'] == next_person_data['mother']:
+                                    st.write(f"{relationship_path[i]} and {next_person} are siblings")
+                    else:
+                        st.warning(f"No relationship found between {individual1} and {individual2}.")
+            else:
+                st.info("Please select two individuals to analyze their relationship.")
+        else:
+            st.warning("No data available for relationship analysis.")
 
