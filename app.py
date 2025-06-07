@@ -16,6 +16,7 @@ from datetime import datetime, date, timedelta
 from urllib.parse import urlparse
 import networkx as nx
 import json
+from streamlit_calendar import calendar
 
 def is_url(string):
     try:
@@ -258,7 +259,7 @@ def create_gantt_chart(tasks, zoo_name):
     
     # Add legend for zoos
     legend_elements = [plt.Rectangle((0,0),1,1, facecolor=color) for color in colors]
-    ax.legend(legend_elements, unique_zoos, title='Zoos', loc='upper right')
+    ax.legend(legend_elements, unique_zoos, title='Zoos', loc='center left', bbox_to_anchor=(1.0, 0.5))
     
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
@@ -341,7 +342,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age, relationship = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis"])
+tr, ppy, gantt, genetic, death_age, relationship, birthday = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -882,9 +883,15 @@ with relationship:
                             elif current['mother'] == next_person:
                                 mermaid_code += f"{relationship_path[i]} -->|mother| {next_person};\n"
                             elif next_person_data['father'] == relationship_path[i]:
-                                mermaid_code += f"{relationship_path[i]} -->|son| {next_person};\n"
+                                if current['gender'] == 'オス':
+                                    mermaid_code += f"{relationship_path[i]} -->|son| {next_person};\n"
+                                else:
+                                    mermaid_code += f"{relationship_path[i]} -->|daughter| {next_person};\n"
                             elif next_person_data['mother'] == relationship_path[i]:
-                                mermaid_code += f"{relationship_path[i]} -->|daughter| {next_person};\n"
+                                if current['gender'] == 'オス':
+                                    mermaid_code += f"{relationship_path[i]} -->|son| {next_person};\n"
+                                else:
+                                    mermaid_code += f"{relationship_path[i]} -->|daughter| {next_person};\n"
                             else:
                                 # 兄弟姉妹関係の場合
                                 if current['father'] == next_person_data['father'] or current['mother'] == next_person_data['mother']:
@@ -909,9 +916,15 @@ with relationship:
                             elif current['mother'] == next_person:
                                 st.write(f"{relationship_path[i]}'s mother is {next_person}")
                             elif next_person_data['father'] == relationship_path[i]:
-                                st.write(f"{next_person} is {relationship_path[i]}'s son")
+                                if current['gender'] == 'オス':
+                                    st.write(f"{next_person} is {relationship_path[i]}'s son")
+                                else:
+                                    st.write(f"{next_person} is {relationship_path[i]}'s daughter")
                             elif next_person_data['mother'] == relationship_path[i]:
-                                st.write(f"{next_person} is {relationship_path[i]}'s daughter")
+                                if current['gender'] == 'オス':
+                                    st.write(f"{next_person} is {relationship_path[i]}'s son")
+                                else:
+                                    st.write(f"{next_person} is {relationship_path[i]}'s daughter")
                             else:
                                 # 兄弟姉妹関係の場合
                                 if current['father'] == next_person_data['father'] or current['mother'] == next_person_data['mother']:
@@ -922,4 +935,82 @@ with relationship:
                 st.info("Please select two individuals to analyze their relationship.")
         else:
             st.warning("No data available for relationship analysis.")
+
+with birthday:
+    st.title("Birthday Calendar")
+    
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    
+    # 日付の変換とデータのクレンジング
+    def convert_date(date_str):
+        try:
+            if type(date_str) is str:
+                return datetime.strptime(date_str, '%Y年%m月%d日').date()
+            else:
+                return None
+        except ValueError:
+            return None
+    
+    # 誕生日を日付型に変換
+    df['birthdate'] = pd.to_datetime(df['birthdate'].apply(convert_date))
+    
+    # 生存している個体のみを抽出（deaddateがnullまたは空の個体）
+    live_df = df[df['deaddate'].isna()].copy()
+    
+    # 日本以外の動物園に所属している個体を除外
+    foreign_zoos = ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ']
+    japan_df = live_df[~live_df['cur_zoo'].isin(foreign_zoos)].copy()
+    
+    # 現在の年の誕生日イベントを作成
+    current_year = datetime.now().year
+    events = []
+    
+    for _, row in japan_df.iterrows():
+        if pd.notna(row['birthdate']):
+            # 誕生日の月と日を取得
+            birth_month = row['birthdate'].month
+            birth_day = row['birthdate'].day
+            
+            # 現在の年の誕生日の日付を作成
+            birthday_date = datetime(current_year, birth_month, birth_day).strftime('%Y-%m-%d')
+            
+            # イベントを作成
+            event = {
+                'title': f"{row['name']}",
+                'start': birthday_date,
+                'end': birthday_date,
+                'color': '#FF9999'  # ピンク系の色
+            }
+            events.append(event)
+    
+    # カレンダーの表示設定
+    calendar_options = {
+        "headerToolbar": {
+            "left": "prev,next today",
+            "center": "title",
+            "right": "dayGridMonth"
+        },
+        "initialView": "dayGridMonth",
+        "locale": "ja",
+        "height": "auto"
+    }
+    
+    # カレンダーを表示
+    calendar_events = calendar(events=events, options=calendar_options, key="birthday_calendar")
+    #st.write(calendar_events)
+    
+    # 今月の誕生日一覧を表示
+    current_month = datetime.now().month
+    current_month_birthdays = japan_df[japan_df['birthdate'].dt.month == current_month].sort_values('birthdate')
+    
+    if not current_month_birthdays.empty:
+        st.write(f"### {current_month}月の誕生日一覧")
+        for _, row in current_month_birthdays.iterrows():
+            st.write(f"- {row['name']}: {row['birthdate'].strftime('%m月%d日')}")
+    else:
+        st.write(f"### {current_month}月の誕生日はありません")
 
