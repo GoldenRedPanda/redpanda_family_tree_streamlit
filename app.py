@@ -1005,7 +1005,10 @@ with birthday:
     
     # 今月の誕生日一覧を表示
     current_month = datetime.now().month
-    current_month_birthdays = japan_df[japan_df['birthdate'].dt.month == current_month].sort_values('birthdate')
+    current_month_birthdays = japan_df[japan_df['birthdate'].dt.month == current_month].copy()
+    # 日付でソート（日のみでソート）
+    current_month_birthdays['birth_day'] = current_month_birthdays['birthdate'].dt.day
+    current_month_birthdays = current_month_birthdays.sort_values('birth_day')
     
     if not current_month_birthdays.empty:
         st.write(f"### {current_month}月の誕生日一覧")
