@@ -94,11 +94,160 @@ def read_csv(file_path):
 
 def sort_children(children):
     def sort_key(child):
-        birthdate_parsed = parse_birthdate(child.get('birthdate', ''))
+        birthdate = child.get('birthdate', '')
+        if isinstance(birthdate, str):
+            birthdate_parsed = parse_birthdate(birthdate)
+        else:
+            # If birthdate is already a Timestamp or datetime object
+            try:
+                birthdate_parsed = birthdate.to_pydatetime() if hasattr(birthdate, 'to_pydatetime') else birthdate
+            except:
+                birthdate_parsed = datetime.min
+        
         gender = child.get('gender', 'オス')  # デフォルトは"オス"
         return (birthdate_parsed, 0 if gender == "オス" else 1)  # オスを左に配置
     
     return sorted(children, key=sort_key)
+
+def get_year_range(person):
+    birth_year = ''
+    death_year = ''
+    
+    # Handle birthdate
+    birthdate = person.get('birthdate')
+    if birthdate:
+        if isinstance(birthdate, str):
+            try:
+                birth_year = datetime.strptime(birthdate, '%Y年%m月%d日').year
+            except:
+                pass
+        else:
+            # If birthdate is already a Timestamp or datetime object
+            try:
+                birth_year = birthdate.year if hasattr(birthdate, 'year') else birthdate.year
+            except:
+                pass
+    
+    # Handle deaddate
+    deaddate = person.get('deaddate')
+    if deaddate:
+        if isinstance(deaddate, str):
+            try:
+                death_year = datetime.strptime(deaddate, '%Y年%m月%d日').year
+            except:
+                pass
+        else:
+            # If deaddate is already a Timestamp or datetime object
+            try:
+                death_year = deaddate.year if hasattr(deaddate, 'year') else deaddate.year
+            except:
+                pass
+    
+    if birth_year and death_year:
+        return f"{birth_year}-{death_year}"
+    elif birth_year:
+        return f"{birth_year}-"
+    return ""
+
+def add_ancestors_for_root(family_data, person_name, connections, depth=0, max_depth=2):
+    """指定された個体の祖先を家系図に追加"""
+    if depth >= max_depth:
+        return
+    
+    person = next((p for p in family_data if p['name'] == person_name), None)
+    if not person:
+        return
+    
+    father = person.get('father', '')
+    mother = person.get('mother', '')
+    
+    if father or mother:
+        parent_node = f"{father}_{mother}" if father and mother else father if father else mother
+        connections.add(f"{parent_node}(( ))")  # 中間ノード
+        connections.add(f"{parent_node} --> {person_name}")
+    
+    if father:
+        father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
+        gender = father_data.get('gender', 'オス')
+        year_range = get_year_range(father_data)
+        cur_zoo = father_data.get('cur_zoo', '')
+        display_text = f"{father}<br>{cur_zoo}<br>{year_range}" if year_range else f"{father}<br>{cur_zoo}"
+        connections.add(f"{father}[{display_text}]:::gender_{gender}")
+        connections.add(f"{father} --> {parent_node}")
+        add_ancestors_for_root(family_data, father, connections, depth + 1, max_depth)
+    
+    if mother:
+        mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
+        gender = mother_data.get('gender', 'メス')
+        year_range = get_year_range(mother_data)
+        cur_zoo = mother_data.get('cur_zoo', '')
+        display_text = f"{mother}<br>{cur_zoo}<br>{year_range}" if year_range else f"{mother}<br>{cur_zoo}"
+        connections.add(f"{mother}[{display_text}]:::gender_{gender}")
+        connections.add(f"{mother} --> {parent_node}")
+        add_ancestors_for_root(family_data, mother, connections, depth + 1, max_depth)
+
+def add_descendants_for_root(family_data, person_name, connections, depth=0, max_depth=2):
+    """指定された個体の子孫を家系図に追加"""
+    if depth >= max_depth:
+        return
+    
+    children = [member for member in family_data if member['father'] == person_name or member['mother'] == person_name]
+    sorted_children = sort_children(children)
+    
+    for child in sorted_children:
+        child_name = child['name']
+        father = child.get('father', '')
+        mother = child.get('mother', '')
+        
+        if father and mother:
+            parent_node = f"{father}_{mother}"
+            connections.add(f"{parent_node}(( ))")  # 中間ノード
+            father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
+            mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
+            
+            # 父親のノードを追加（まだ追加されていない場合）
+            if not any(father in conn for conn in connections):
+                gender = father_data.get('gender', 'オス')
+                year_range = get_year_range(father_data)
+                cur_zoo = father_data.get('cur_zoo', '')
+                display_text = f"{father}<br>{cur_zoo}<br>{year_range}" if year_range else f"{father}<br>{cur_zoo}"
+                connections.add(f"{father}[{display_text}]:::gender_{gender}")
+            
+            # 母親のノードを追加（まだ追加されていない場合）
+            if not any(mother in conn for conn in connections):
+                gender = mother_data.get('gender', 'メス')
+                year_range = get_year_range(mother_data)
+                cur_zoo = mother_data.get('cur_zoo', '')
+                display_text = f"{mother}<br>{cur_zoo}<br>{year_range}" if year_range else f"{mother}<br>{cur_zoo}"
+                connections.add(f"{mother}[{display_text}]:::gender_{gender}")
+            
+            connections.add(f"{father} --> {parent_node}")
+            connections.add(f"{mother} --> {parent_node}")
+        else:
+            parent_node = f"{father or mother}_child"
+            connections.add(f"{parent_node}(( ))")  # 中間ノード
+            parent_data = next((p for p in family_data if p['name'] == (father or mother)), 
+                             {'name': father or mother, 'gender': 'オス' if father else 'メス'})
+            
+            # 親のノードを追加（まだ追加されていない場合）
+            if not any((father or mother) in conn for conn in connections):
+                gender = parent_data.get('gender', 'オス' if father else 'メス')
+                year_range = get_year_range(parent_data)
+                cur_zoo = parent_data.get('cur_zoo', '')
+                display_text = f"{father or mother}<br>{cur_zoo}<br>{year_range}" if year_range else f"{father or mother}<br>{cur_zoo}"
+                connections.add(f"{(father or mother)}[{display_text}]:::gender_{gender}")
+            
+            connections.add(f"{(father or mother)} --> {parent_node}")
+        
+        # 子のノードを追加
+        gender = child.get('gender', 'オス')
+        year_range = get_year_range(child)
+        cur_zoo = child.get('cur_zoo', '')
+        display_text = f"{child_name}<br>{cur_zoo}<br>{year_range}" if year_range else f"{child_name}<br>{cur_zoo}"
+        connections.add(f"{child_name}[{display_text}]:::gender_{gender}")
+        connections.add(f"{parent_node} --> {child_name}")
+        
+        add_descendants_for_root(family_data, child_name, connections, depth + 1, max_depth)
 
 def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2, show_images=False):
     mermaid_code = "graph TD;\n"
@@ -206,7 +355,19 @@ def create_gantt_chart(tasks, zoo_name):
     Create a Gantt chart from a list of tasks.
     Each task should be a dictionary with 'Task', 'Start', 'End', 'Status', and 'Zoo' keys.
     """
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # 個体数に応じて図の高さを動的に調整
+    num_tasks = len(tasks)
+    base_height = 6  # 基本の高さ
+    height_per_task = 0.4  # 1個体あたりの高さ
+    min_height = 4  # 最小の高さ
+    max_height = 20  # 最大の高さ
+    
+    # 個体数に基づいて高さを計算
+    calculated_height = base_height + (num_tasks * height_per_task)
+    # 最小・最大値の範囲内に制限
+    fig_height = max(min_height, min(calculated_height, max_height))
+    
+    fig, ax = plt.subplots(figsize=(12, fig_height))
     
     # Sort tasks by start date
     tasks = sorted(tasks, key=lambda x: x['Start'])
@@ -462,6 +623,8 @@ with gantt:
     live_df = live_df[live_df['birthdate'] >= pd.Timestamp('2003-01-01')]
     
     df = pd.concat([live_df, dead_df])
+    df['father'] = df['father'].apply(clean_name)
+    df['mother'] = df['mother'].apply(clean_name)
     zoo_options = list(set(df['birth_zoo'].unique()) | set(df['move_zoo1'].dropna().unique()) | 
                       set(df['move_zoo2'].dropna().unique()) | set(df['move_zoo3'].dropna().unique()))
     zoo_name = st.selectbox("Zoo Name", [""] + sorted(zoo_options))
@@ -547,6 +710,105 @@ with gantt:
             
             The chart visualizes when each individual was present at the selected zoo, whether they were born there or moved there later in life.
             """)
+            
+            # 家系図の作成
+            st.write("### Family Tree of Individuals Born at Selected Zoo")
+            
+            # 指定された動物園で生まれた個体を取得
+            born_at_zoo = df[df['birth_zoo'] == zoo_name]['name'].unique().tolist()
+            
+            if born_at_zoo:
+                # 家系図に含める個体を収集
+                family_members = set()
+                
+                # 指定された動物園で生まれた個体を追加
+                family_members.update(born_at_zoo)
+                
+                # 各個体の親と子を追加
+                for individual in born_at_zoo:
+                    # 個体の情報を取得
+                    individual_data = df[df['name'] == individual]
+                    if not individual_data.empty:
+                        row = individual_data.iloc[0]
+                        
+                        # 親を追加
+                        if pd.notna(row['father']) and row['father'] != '':
+                            family_members.add(row['father'])
+                        if pd.notna(row['mother']) and row['mother'] != '':
+                            family_members.add(row['mother'])
+                        
+                        # 子を追加
+                        children = df[(df['father'] == individual) | (df['mother'] == individual)]
+                        for _, child in children.iterrows():
+                            family_members.add(child['name'])
+                
+                # 家系図データを作成
+                family_data = []
+                for member in family_members:
+                    member_data = df[df['name'] == member]
+                    if not member_data.empty:
+                        row = member_data.iloc[0]
+                        # live_dfに含まれる個体（生存している個体）の場合はdeaddateを削除
+                        deaddate = None if member in live_df['name'].values else row['deaddate']
+                        family_data.append({
+                            'name': row['name'],
+                            'father': row['father'] if pd.notna(row['father']) else '',
+                            'mother': row['mother'] if pd.notna(row['mother']) else '',
+                            'gender': row['gender'],
+                            'birthdate': row['birthdate'],
+                            'deaddate': deaddate,
+                            'cur_zoo': row['cur_zoo'],
+                            'image': row.get('image', '')
+                        })
+                
+                # 家系図を生成
+                if family_data:
+                    # 指定された動物園で生まれた全ての個体をルートとして家系図を生成
+                    # 複数のルート個体を処理するためのカスタムMermaidコード生成
+                    mermaid_code = "graph TD;\n"
+                    connections = OrderedSet()
+                    
+                    # 各ルート個体について家系図を生成
+                    for root_individual in born_at_zoo:
+                        # ルート個体の情報を取得
+                        root_data = next((p for p in family_data if p['name'] == root_individual), None)
+                        if root_data:
+                            # ルート個体のノードを追加（特別なスタイルで）
+                            gender = root_data.get('gender', 'オス')
+                            year_range = get_year_range(root_data)
+                            cur_zoo = root_data.get('cur_zoo', '')
+                            display_text = f"{root_data['name']}<br>{cur_zoo}<br>{year_range}" if year_range else f"{root_data['name']}<br>{cur_zoo}"
+                            connections.add(f"{root_data['name']}[{display_text}]:::root_{gender}")
+                            
+                            # 親を追加（2世代）
+                            add_ancestors_for_root(family_data, root_individual, connections, depth=0, max_depth=2)
+                            # 子を追加（2世代）
+                            add_descendants_for_root(family_data, root_individual, connections, depth=0, max_depth=2)
+                    
+                    # スタイル定義を追加
+                    mermaid_code += "\nclassDef gender_オス stroke:blue,stroke-width:2px;\n"
+                    mermaid_code += "classDef gender_メス stroke:pink,stroke-width:2px;\n"
+                    mermaid_code += "classDef root_オス stroke:blue,stroke-width:4px,fill:#e6f3ff;\n"
+                    mermaid_code += "classDef root_メス stroke:pink,stroke-width:4px,fill:#ffe6f3;\n"
+                    
+                    mermaid_code += "\n".join(connections)
+                    
+                    # 家系図の説明を追加
+                    st.write(f"**Unified family tree showing all individuals born at {zoo_name} and their family members:**")
+                    st.write(f"- Individuals born at {zoo_name}: {', '.join(born_at_zoo)}")
+                    st.write(f"- Total family members shown: {len(family_members)}")
+                    st.write(f"- Root individuals (highlighted): {', '.join(born_at_zoo)}")
+                    
+                    # 家系図を表示
+                    st_mermaid(mermaid_code, key=f"gantt_family_tree_{zoo_name}")
+                    
+                    # Mermaid Live Editor へのリンク
+                    url = mermaid_to_pako_url(mermaid_code)
+                    st.markdown(f"[Mermaid Live Editor で開く]({url})", unsafe_allow_html=True)
+                else:
+                    st.warning("No family data available for the selected individuals.")
+            else:
+                st.warning(f"No individuals were born at {zoo_name}.")
         else:
             st.warning(f"No individuals found who were at {zoo_name} at any point in their lives.")
     else:
@@ -883,12 +1145,12 @@ with relationship:
                             elif current['mother'] == next_person:
                                 mermaid_code += f"{relationship_path[i]} -->|mother| {next_person};\n"
                             elif next_person_data['father'] == relationship_path[i]:
-                                if current['gender'] == 'オス':
+                                if next_person_data['gender'] == 'オス':
                                     mermaid_code += f"{relationship_path[i]} -->|son| {next_person};\n"
                                 else:
                                     mermaid_code += f"{relationship_path[i]} -->|daughter| {next_person};\n"
                             elif next_person_data['mother'] == relationship_path[i]:
-                                if current['gender'] == 'オス':
+                                if next_person_data['gender'] == 'オス':
                                     mermaid_code += f"{relationship_path[i]} -->|son| {next_person};\n"
                                 else:
                                     mermaid_code += f"{relationship_path[i]} -->|daughter| {next_person};\n"
