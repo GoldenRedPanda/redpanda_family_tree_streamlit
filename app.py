@@ -17,6 +17,9 @@ from urllib.parse import urlparse
 import networkx as nx
 import json
 from streamlit_calendar import calendar
+import folium
+import geopandas as gpd
+from streamlit_folium import st_folium
 
 def is_url(string):
     try:
@@ -492,6 +495,98 @@ def plot_genetic_distribution(df, ancestors):
     
     return fig
 
+def get_zoo_coordinates():
+    """日本の主要動物園の座標を返す"""
+    zoo_coords = {
+        '上野動物園': [35.7167, 139.7714],
+        '多摩動物公園': [35.6492, 139.2758],
+        '井の頭自然文化園': [35.7000, 139.5833],
+        '葛西臨海水族園': [35.6447, 139.8633],
+        '神奈川県立生命の星・地球博物館': [35.2833, 139.1167],
+        '横浜市立金沢動物園': [35.3833, 139.6167],
+        '千葉市動物公園': [35.6167, 140.1167],
+        '市川市動植物園': [35.7167, 139.9333],
+        '東武動物公園': [36.0333, 139.7167],
+        '群馬サファリパーク': [36.3167, 139.0167],
+        'こども動物自然公園': [35.9500, 139.3833],
+        'さいたま市大宮公園小動物園': [35.9167, 139.6333],
+        '千葉県立房総のむら': [35.7167, 140.2167],
+        '市原ぞうの国': [35.4833, 140.1167],
+        '新潟市水族館マリンピア日本海': [37.9333, 139.0333],
+        '富山市ファミリーパーク': [36.7000, 137.2167],
+        'いしかわ動物園': [36.5500, 136.6500],
+        '福井県立恐竜博物館': [35.8167, 136.4833],
+        '山梨県立富士湧水の里水族館': [35.4833, 138.8000],
+        '茶臼山動物園': [36.6500, 138.1833],
+        '日本平動物園': [34.9833, 138.4167],
+        '浜松市動物園': [34.7167, 137.7333],
+        '東山動植物園': [35.1667, 136.9500],
+        'のんほいパーク': [34.7667, 137.3833],
+        '三重県立みえこどもの城': [34.7167, 136.5167],
+        '滋賀県立琵琶湖博物館': [35.0667, 135.8667],
+        '京都市動物園': [35.0167, 135.7833],
+        '天王寺動物園': [34.6833, 135.5167],
+        '王子動物園': [34.7167, 135.1833],
+        '姫路セントラルパーク': [34.8500, 134.7000],
+        '和歌山県立自然博物館': [34.2333, 135.1667],
+        '奈良県立橿原考古学研究所附属博物館': [34.4833, 135.7833],
+        '鳥取市立鳥取砂丘こどもの国': [35.5333, 134.2333],
+        '島根県立宍道湖自然館ゴビウス': [35.4667, 133.0167],
+        '岡山市半田山植物園': [34.6500, 133.9167],
+        '安佐動物公園': [34.4667, 132.4500],
+        '山口県立山口博物館': [34.1833, 131.4667],
+        '徳島県立博物館': [34.0667, 134.5500],
+        '香川県立ミュージアム': [34.3333, 134.0500],
+        'とべ動物園': [33.8167, 132.7667],
+        'のいち動物公園': [33.5500, 133.5333],
+        '福岡市動物園': [33.5833, 130.3833],
+        '北九州市立到津の森公園': [33.8833, 130.8833],
+        '佐賀県立宇宙科学館': [33.2667, 130.3000],
+        '長崎県立対馬歴史民俗資料館': [34.2000, 129.2833],
+        '熊本市動植物園': [32.8000, 130.7167],
+        '大分県立美術館': [33.2333, 131.6000],
+        '宮崎県立美術館': [31.9167, 131.4167],
+        '平川動物公園': [31.5833, 130.5500],
+        '沖縄県立博物館・美術館': [26.2167, 127.6833],
+        '沖縄こどもの国': [26.4333, 127.8000],
+        '円山動物園': [43.0500, 141.3167],
+        '旭山動物園': [43.7667, 142.4833],
+        '釧路市動物園': [43.0000, 144.3833],
+        '大森山動物園': [39.7500, 140.7167],
+        'かみね動物園': [36.3667, 140.4667],
+        '西山動物園': [35.9500, 136.1833],
+        '神戸どうぶつ王国': [34.6500, 135.1833],
+        '那須どうぶつ王国': [36.9333, 140.0167],
+        '那須ワールドモンキーパーク': [36.8500, 140.1000],
+        'とくしま動物園': [34.0667, 134.5500],
+        'アドベンチャーワールド': [33.6667, 135.3667],
+        '野毛山動物園': [35.4500, 139.6167],
+        'ズーラシア': [35.5167, 139.5167],
+        'ネオパークオキナワ': [26.4333, 127.8000],
+        'フェニックス自然動物園': [31.9167, 131.4167],
+        '九十九島動植物園': [33.2667, 129.8500],
+        '八景島シーパラダイス': [35.3833, 139.6333],
+        '伊豆シャボテン動物公園': [34.7833, 138.7833],
+        '八木山動物公園': [38.2500, 140.8833],
+        '到津の森公園': [33.8833, 130.8833],
+        '夢見ヶ崎動物公園': [35.5500, 139.7167],
+        '大牟田市動物園': [33.0333, 130.4500],
+        '大島公園動物園': [34.7500, 139.3667],
+        '富士サファリパーク': [35.3167, 138.8167],
+        '姫路市立動物園': [34.8500, 134.7000],
+        '東北サファリパーク': [37.4333, 140.4833],
+        '徳山動物園': [34.0500, 131.8000],
+        '池田動物園': [34.6500, 133.9167],
+        '桐生が岡動物園': [36.4000, 139.3333],
+        '楽寿園': [35.6333, 139.4667],
+        '江戸川区自然動物園': [35.7000, 139.8667],
+        '羽村市動物公園': [35.7667, 139.3167],
+        '福知山市動物園': [35.3000, 135.1167],
+        '秋吉台サファリランド': [34.2333, 131.3000],
+        '長崎バイオパーク': [32.8333, 129.8833]
+    }
+    return zoo_coords
+
 st.title("Family Tree Generator")
 
 default_csv_path = "redpanda.csv"
@@ -503,7 +598,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age, relationship, birthday = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar"])
+tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -1278,4 +1373,119 @@ with birthday:
             st.write(f"- {row['name']}: {row['birthdate'].strftime('%m月%d日')}")
     else:
         st.write(f"### {current_month}月の誕生日はありません")
+
+with map_view:
+    st.title("Map View of Living Individuals")
+    
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    
+    # 生存している個体のみを抽出（deaddateがnullまたは空の個体）
+    live_df = df[df['deaddate'].isna()].copy()
+    
+    # 日本以外の動物園に所属している個体を除外
+    foreign_zoos = ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ']
+    japan_df = live_df[~live_df['cur_zoo'].isin(foreign_zoos)].copy()
+    
+    if not japan_df.empty:
+        # 動物園の座標を取得
+        zoo_coords = get_zoo_coordinates()
+        
+        # 日本の中心座標でマップを作成
+        japan_center = [36.2048, 138.2529]  # 日本の中心座標
+        m = folium.Map(location=japan_center, zoom_start=5, tiles='OpenStreetMap')
+        
+        # 動物園ごとに個体をグループ化
+        zoo_individuals = {}
+        for _, row in japan_df.iterrows():
+            zoo = row['cur_zoo']
+            if zoo not in zoo_individuals:
+                zoo_individuals[zoo] = []
+            zoo_individuals[zoo].append({
+                'name': row['name'],
+                'gender': row['gender'],
+                'birthdate': row['birthdate']
+            })
+        
+        # 各動物園にマーカーを追加
+        for zoo, individuals in zoo_individuals.items():
+            if zoo in zoo_coords:
+                lat, lon = zoo_coords[zoo]
+                
+                # 個体の情報をHTMLで作成
+                individuals_html = "<div style='max-height: 200px; overflow-y: auto;'>"
+                individuals_html += f"<h4>{zoo}</h4>"
+                individuals_html += f"<p><strong>個体数: {len(individuals)}</strong></p>"
+                individuals_html += "<ul>"
+                
+                # 性別ごとに個体を分類
+                males = [ind for ind in individuals if ind['gender'] == 'オス']
+                females = [ind for ind in individuals if ind['gender'] == 'メス']
+                
+                if males:
+                    individuals_html += "<li><strong>オス:</strong>"
+                    for male in males:
+                        individuals_html += f" {male['name']},"
+                    individuals_html = individuals_html.rstrip(',') + "</li>"
+                
+                if females:
+                    individuals_html += "<li><strong>メス:</strong>"
+                    for female in females:
+                        individuals_html += f" {female['name']},"
+                    individuals_html = individuals_html.rstrip(',') + "</li>"
+                
+                individuals_html += "</ul></div>"
+                
+                # マーカーの色を個体数に応じて変更
+                if len(individuals) >= 5:
+                    color = 'red'
+                elif len(individuals) >= 3:
+                    color = 'orange'
+                elif len(individuals) >= 2:
+                    color = 'purple'
+                else:
+                    color = 'green'
+                
+                # マーカーを追加
+                folium.Marker(
+                    location=[lat, lon],
+                    popup=folium.Popup(individuals_html, max_width=300),
+                    tooltip=f"{zoo}: {len(individuals)}個体",
+                    icon=folium.Icon(color=color, icon='info-sign')
+                ).add_to(m)
+        
+        # マップを表示
+        st_folium(m, width=700, height=500)
+        
+        # 統計情報を表示
+        st.write("### 統計情報")
+        st.write(f"**総個体数**: {len(japan_df)}")
+        st.write(f"**動物園数**: {len(zoo_individuals)}")
+        
+        # 性別ごとの統計
+        male_count = len(japan_df[japan_df['gender'] == 'オス'])
+        female_count = len(japan_df[japan_df['gender'] == 'メス'])
+        st.write(f"**オス**: {male_count}個体")
+        st.write(f"**メス**: {female_count}個体")
+        
+        # 動物園別の個体数ランキング
+        st.write("### 動物園別個体数ランキング")
+        zoo_counts = {zoo: len(individuals) for zoo, individuals in zoo_individuals.items()}
+        sorted_zoos = sorted(zoo_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        for i, (zoo, count) in enumerate(sorted_zoos, 1):
+            st.write(f"{i}. {zoo}: {count}個体")
+        
+        # マーカーの色の説明
+        st.write("### マーカーの色の意味")
+        st.write("- 🟢 緑: 1個体")
+        st.write("- 🟡 黄: 2個体")
+        st.write("- 🟠 オレンジ: 3-4個体")
+        st.write("- 🔴 赤: 5個体以上")
+        
+    else:
+        st.warning("日本国内に生存している個体が見つかりませんでした。")
 
