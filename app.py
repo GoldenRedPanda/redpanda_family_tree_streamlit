@@ -598,7 +598,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View"])
+tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -1488,4 +1488,102 @@ with map_view:
         
     else:
         st.warning("日本国内に生存している個体が見つかりませんでした。")
+
+with genetic_distance:
+    st.title("Genetic Distance Between Individuals")
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = None
+    if df is not None and df.shape[0] > 0:
+        df['father'] = df['father'].apply(clean_name)
+        df['mother'] = df['mother'].apply(clean_name)
+        # 生存個体のみ抽出
+        live_df = df[df['deaddate'].isna()].copy()
+        if live_df.empty:
+            st.warning("No living individuals available for genetic distance analysis.")
+        else:
+            # 日本以外の動物園に所属している個体を除外
+            foreign_zoos = ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ']
+            japan_df = live_df[~live_df['cur_zoo'].isin(foreign_zoos)].copy()
+            if japan_df.empty:
+                st.warning("No living individuals in Japan available for genetic distance analysis.")
+            else:
+                # 年齢計算のための日付変換
+                def convert_date(date_str):
+                    try:
+                        if type(date_str) is str:
+                            return datetime.strptime(date_str, '%Y年%m月%d日').date()
+                        else:
+                            return None
+                    except ValueError:
+                        return None
+                japan_df['birthdate'] = pd.to_datetime(japan_df['birthdate'].apply(convert_date))
+                # 現在の年齢を計算
+                today = pd.Timestamp.now()
+                japan_df['age'] = (today - japan_df['birthdate']).dt.days // 365
+                individual_options = list(japan_df['name'].unique())
+                selected_individual = st.selectbox("Select Individual for Genetic Distance", [""] + individual_options, key="genetic_distance_select")
+                if selected_individual:
+                    selected_row = japan_df[japan_df['name'] == selected_individual]
+                    if selected_row.empty:
+                        st.warning("Selected individual not found among living individuals in Japan.")
+                    else:
+                        selected_gender = selected_row.iloc[0]['gender']
+                        # 反対の性別を決定
+                        opposite_gender = 'メス' if selected_gender == 'オス' else 'オス'
+                        # 計算対象: 日本に生存、反対の性別、9歳以下
+                        candidates_df = japan_df[(japan_df['gender'] == opposite_gender) & (japan_df['age'] <= 9)]
+                        candidate_names = list(candidates_df['name'].unique())
+                        if not candidate_names:
+                            st.warning(f"No living {opposite_gender} individuals aged 9 or younger found in Japan.")
+                        else:
+                            # 1. 全個体の遺伝子ベクトルを作成
+                            zoo_set = set(df['cur_zoo'].dropna().unique())
+                            zoo_list = sorted(list(zoo_set))
+                            zoo_index = {z: i for i, z in enumerate(zoo_list)}
+                            def get_gene_vector(ind_name):
+                                ancestors = find_oldest_ancestors(df, ind_name)
+                                vec = np.zeros(len(zoo_list))
+                                for ancestor, weight in ancestors:
+                                    ancestor_data = df[df['name'] == ancestor]
+                                    if not ancestor_data.empty:
+                                        zoo = ancestor_data.iloc[0]['cur_zoo']
+                                        if zoo in zoo_index:
+                                            vec[zoo_index[zoo]] += weight
+                                return vec
+                            # 指定個体の遺伝子ベクトル
+                            target_vec = get_gene_vector(selected_individual)
+                            # 2. 他の個体との距離を計算
+                            distances = []
+                            for name in candidate_names:
+                                if name == selected_individual:
+                                    continue
+                                vec = get_gene_vector(name)
+                                dist = np.linalg.norm(target_vec - vec)
+                                # 年齢も取得
+                                age = candidates_df[candidates_df['name'] == name].iloc[0]['age']
+                                distances.append((name, dist, age))
+                            # 3. 距離が遠い順にソート
+                            distances.sort(key=lambda x: -x[1])
+                            st.write(f"Top 5 living {opposite_gender} individuals (aged 9 or younger) with the largest genetic distance from {selected_individual}:")
+                            for i, (name, dist, age) in enumerate(distances[:5], 1):
+                                st.write(f"{i}. {name} (Age: {age}, Genetic Distance: {dist:.4f})")
+                            # オプション: 距離の分布をヒストグラムで表示
+                            if distances:
+                                st.write("\n#### Genetic Distance Distribution (all candidates)")
+                                import matplotlib.pyplot as plt
+                                fig, ax = plt.subplots(figsize=(8, 4))
+                                ax.hist([d[1] for d in distances], bins=20, color='gray', alpha=0.7)
+                                ax.set_xlabel('Genetic Distance')
+                                ax.set_ylabel('Count')
+                                ax.set_title('Distribution of Genetic Distances')
+                                st.pyplot(fig)
+                else:
+                    st.info("Please select a living individual in Japan to calculate genetic distances.")
+    else:
+        st.warning("No data available for genetic distance analysis.")
 
