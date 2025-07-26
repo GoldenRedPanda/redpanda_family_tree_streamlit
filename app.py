@@ -1,500 +1,34 @@
-import csv
-import re
 import streamlit as st
-import zlib
-import base64
-import urllib.parse
 import numpy as np
-from datetime import datetime
-import os
-from streamlit_mermaid import st_mermaid
-from collections import OrderedDict
 import pandas as pd
 import japanize_matplotlib
 import matplotlib.pyplot as plt
 from datetime import datetime, date, timedelta
-from urllib.parse import urlparse
-import networkx as nx
-import json
+import os
+from streamlit_mermaid import st_mermaid
 from streamlit_calendar import calendar
 import folium
-import geopandas as gpd
 from streamlit_folium import st_folium
 
-def is_url(string):
-    try:
-        result = urlparse(string)
-        return all([result.scheme, result.netloc])
-    except ValueError:
-        return False
+# Import our custom modules
+from utils import (
+    mermaid_to_pako_url, clean_name, convert_date, convert_date_through,
+    get_year_range, get_foreign_zoos, filter_japan_living_individuals, OrderedSet
+)
+from data_processing import (
+    read_csv, sort_children, prepare_dataframe_for_analysis,
+    prepare_gantt_dataframe, get_individual_options, get_zoo_options
+)
+from genetic_analysis import (
+    find_oldest_ancestors, get_gene_vector, calculate_genetic_distances,
+    get_opposite_gender_candidates, prepare_genetic_analysis_data
+)
+from visualization import (
+    plot_genetic_distribution, plot_distance_distribution, create_gantt_chart,
+    add_ancestors_for_root, add_descendants_for_root, generate_mermaid
+)
 
-def js_btoa(data):
-    return base64.b64encode(data)
-
-def pako_deflate(data):
-    compress = zlib.compressobj(9, zlib.DEFLATED, 15, 8, zlib.Z_DEFAULT_STRATEGY)
-    compressed_data = compress.compress(data)
-    compressed_data += compress.flush()
-    return compressed_data
-
-def mermaid_to_pako_url(graphMarkdown: str):
-    jGraph = {"code": graphMarkdown, "mermaid": {"theme": "default"}}
-    byteStr = json.dumps(jGraph).encode('utf-8')
-    deflated = pako_deflate(byteStr)
-    dEncode = js_btoa(deflated)
-    link = 'http://mermaid.live/edit#pako:' + dEncode.decode('ascii')
-    return link
-
-
-
-class OrderedSet:
-    def __init__(self):
-        self.data = OrderedDict()
-
-    def add(self, item):
-        self.data[item] = None  # 値は不要
-
-    def __contains__(self, item):
-        return item in self.data
-
-    def __iter__(self):
-        return iter(self.data.keys())
-
-    def __repr__(self):
-        return f"OrderedSet({list(self.data.keys())})"
-
-def clean_name(name):
-    if pd.isna(name) or name is None:
-        return ''
-    if isinstance(name, float):
-        return ''
-    return re.sub(r'\s*\(.*?\).*', '', str(name)) if name else ''
-
-def escape_mermaid(name):
-    return name.replace("-", "\\-").replace(" ", "\\ ").replace("(", "\\(").replace(")", "\\)")
-    return name
-
-def parse_birthdate(birthdate):
-    match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', birthdate)
-    if match:
-        year, month, day = map(int, match.groups())
-        return datetime(year, month, day)
-    return datetime.min
-
-def read_csv(file_path):
-    family_data = []
-    with open(file_path, newline='', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            row['name'] = escape_mermaid(clean_name(row['name']))
-            row['father'] = escape_mermaid(clean_name(row['father']))
-            row['mother'] = escape_mermaid(clean_name(row['mother']))
-            row['birthdate'] = row['birthdate'] if 'birthdate' in row else ''
-            row['gender'] = row['gender'] if 'gender' in row else 'オス'
-            row['image'] = row['image'] if 'image' in row else ''
-            family_data.append(row)
-    return family_data
-
-def sort_children(children):
-    def sort_key(child):
-        birthdate = child.get('birthdate', '')
-        if isinstance(birthdate, str):
-            birthdate_parsed = parse_birthdate(birthdate)
-        else:
-            # If birthdate is already a Timestamp or datetime object
-            try:
-                birthdate_parsed = birthdate.to_pydatetime() if hasattr(birthdate, 'to_pydatetime') else birthdate
-            except:
-                birthdate_parsed = datetime.min
-        
-        gender = child.get('gender', 'オス')  # デフォルトは"オス"
-        return (birthdate_parsed, 0 if gender == "オス" else 1)  # オスを左に配置
-    
-    return sorted(children, key=sort_key)
-
-def get_year_range(person):
-    birth_year = ''
-    death_year = ''
-    
-    # Handle birthdate
-    birthdate = person.get('birthdate')
-    if birthdate:
-        if isinstance(birthdate, str):
-            try:
-                birth_year = datetime.strptime(birthdate, '%Y年%m月%d日').year
-            except:
-                pass
-        else:
-            # If birthdate is already a Timestamp or datetime object
-            try:
-                birth_year = birthdate.year if hasattr(birthdate, 'year') else birthdate.year
-            except:
-                pass
-    
-    # Handle deaddate
-    deaddate = person.get('deaddate')
-    if deaddate:
-        if isinstance(deaddate, str):
-            try:
-                death_year = datetime.strptime(deaddate, '%Y年%m月%d日').year
-            except:
-                pass
-        else:
-            # If deaddate is already a Timestamp or datetime object
-            try:
-                death_year = deaddate.year if hasattr(deaddate, 'year') else deaddate.year
-            except:
-                pass
-    
-    if birth_year and death_year:
-        return f"{birth_year}-{death_year}"
-    elif birth_year:
-        return f"{birth_year}-"
-    return ""
-
-def add_ancestors_for_root(family_data, person_name, connections, depth=0, max_depth=2):
-    """指定された個体の祖先を家系図に追加"""
-    if depth >= max_depth:
-        return
-    
-    person = next((p for p in family_data if p['name'] == person_name), None)
-    if not person:
-        return
-    
-    father = person.get('father', '')
-    mother = person.get('mother', '')
-    
-    if father or mother:
-        parent_node = f"{father}_{mother}" if father and mother else father if father else mother
-        connections.add(f"{parent_node}(( ))")  # 中間ノード
-        connections.add(f"{parent_node} --> {person_name}")
-    
-    if father:
-        father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
-        gender = father_data.get('gender', 'オス')
-        year_range = get_year_range(father_data)
-        cur_zoo = father_data.get('cur_zoo', '')
-        display_text = f"{father}<br>{cur_zoo}<br>{year_range}" if year_range else f"{father}<br>{cur_zoo}"
-        connections.add(f"{father}[{display_text}]:::gender_{gender}")
-        connections.add(f"{father} --> {parent_node}")
-        add_ancestors_for_root(family_data, father, connections, depth + 1, max_depth)
-    
-    if mother:
-        mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
-        gender = mother_data.get('gender', 'メス')
-        year_range = get_year_range(mother_data)
-        cur_zoo = mother_data.get('cur_zoo', '')
-        display_text = f"{mother}<br>{cur_zoo}<br>{year_range}" if year_range else f"{mother}<br>{cur_zoo}"
-        connections.add(f"{mother}[{display_text}]:::gender_{gender}")
-        connections.add(f"{mother} --> {parent_node}")
-        add_ancestors_for_root(family_data, mother, connections, depth + 1, max_depth)
-
-def add_descendants_for_root(family_data, person_name, connections, depth=0, max_depth=2):
-    """指定された個体の子孫を家系図に追加"""
-    if depth >= max_depth:
-        return
-    
-    children = [member for member in family_data if member['father'] == person_name or member['mother'] == person_name]
-    sorted_children = sort_children(children)
-    
-    for child in sorted_children:
-        child_name = child['name']
-        father = child.get('father', '')
-        mother = child.get('mother', '')
-        
-        if father and mother:
-            parent_node = f"{father}_{mother}"
-            connections.add(f"{parent_node}(( ))")  # 中間ノード
-            father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
-            mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
-            
-            # 父親のノードを追加（まだ追加されていない場合）
-            if not any(father in conn for conn in connections):
-                gender = father_data.get('gender', 'オス')
-                year_range = get_year_range(father_data)
-                cur_zoo = father_data.get('cur_zoo', '')
-                display_text = f"{father}<br>{cur_zoo}<br>{year_range}" if year_range else f"{father}<br>{cur_zoo}"
-                connections.add(f"{father}[{display_text}]:::gender_{gender}")
-            
-            # 母親のノードを追加（まだ追加されていない場合）
-            if not any(mother in conn for conn in connections):
-                gender = mother_data.get('gender', 'メス')
-                year_range = get_year_range(mother_data)
-                cur_zoo = mother_data.get('cur_zoo', '')
-                display_text = f"{mother}<br>{cur_zoo}<br>{year_range}" if year_range else f"{mother}<br>{cur_zoo}"
-                connections.add(f"{mother}[{display_text}]:::gender_{gender}")
-            
-            connections.add(f"{father} --> {parent_node}")
-            connections.add(f"{mother} --> {parent_node}")
-        else:
-            parent_node = f"{father or mother}_child"
-            connections.add(f"{parent_node}(( ))")  # 中間ノード
-            parent_data = next((p for p in family_data if p['name'] == (father or mother)), 
-                             {'name': father or mother, 'gender': 'オス' if father else 'メス'})
-            
-            # 親のノードを追加（まだ追加されていない場合）
-            if not any((father or mother) in conn for conn in connections):
-                gender = parent_data.get('gender', 'オス' if father else 'メス')
-                year_range = get_year_range(parent_data)
-                cur_zoo = parent_data.get('cur_zoo', '')
-                display_text = f"{father or mother}<br>{cur_zoo}<br>{year_range}" if year_range else f"{father or mother}<br>{cur_zoo}"
-                connections.add(f"{(father or mother)}[{display_text}]:::gender_{gender}")
-            
-            connections.add(f"{(father or mother)} --> {parent_node}")
-        
-        # 子のノードを追加
-        gender = child.get('gender', 'オス')
-        year_range = get_year_range(child)
-        cur_zoo = child.get('cur_zoo', '')
-        display_text = f"{child_name}<br>{cur_zoo}<br>{year_range}" if year_range else f"{child_name}<br>{cur_zoo}"
-        connections.add(f"{child_name}[{display_text}]:::gender_{gender}")
-        connections.add(f"{parent_node} --> {child_name}")
-        
-        add_descendants_for_root(family_data, child_name, connections, depth + 1, max_depth)
-
-def generate_mermaid(family_data, root_name=None, parent_depth=2, child_depth=2, show_images=False):
-    mermaid_code = "graph TD;\n"
-    connections = OrderedSet()
-    
-    family_dict = {person['name']: person for person in family_data}
-    
-    def get_year_range(person):
-        birth_year = ''
-        death_year = ''
-        if person.get('birthdate'):
-            try:
-                birth_year = datetime.strptime(person['birthdate'], '%Y年%m月%d日').year
-            except:
-                pass
-        if person.get('deaddate'):
-            try:
-                death_year = datetime.strptime(person['deaddate'], '%Y年%m月%d日').year
-            except:
-                pass
-        if birth_year and death_year:
-            return f"{birth_year}-{death_year}"
-        elif birth_year:
-            return f"{birth_year}-"
-        return ""
-    
-    def add_person_node(person):
-        gender = person.get('gender', 'オス')
-        year_range = get_year_range(person)
-        cur_zoo = person.get('cur_zoo', '')
-        display_text = f"{person['name']}<br>{cur_zoo}<br>{year_range}" if year_range else f"{person['name']}<br>{cur_zoo}"
-        
-        if person.get('image', ''):
-            img = person.get('image', '').split(',')[0]
-            if show_images and is_url(img):
-                return f"{person['name']}[{display_text}<br><img src=\"{img}\" />]:::gender_{gender}"
-            else:
-                return f"{person['name']}[{display_text}]:::gender_{gender}"
-        return f"{person['name']}[{display_text}]:::gender_{gender}"
-    
-    def add_ancestors(person_name, depth=0):
-        if person_name not in family_dict or depth >= parent_depth:
-            return
-        
-        person = family_dict[person_name]
-        father = person['father']
-        mother = person['mother']
-        
-        if father or mother:
-            parent_node = f"{father}_{mother}" if father and mother else father if father else mother
-            connections.add(f"{parent_node}(( ))")  # 中間ノード
-            connections.add(f"{parent_node} --> {add_person_node(person)}")
-        
-        if father:
-            father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
-            connections.add(f"{add_person_node(father_data)} --> {parent_node}")
-            add_ancestors(father, depth + 1)
-        if mother:
-            mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
-            connections.add(f"{add_person_node(mother_data)} --> {parent_node}")
-            add_ancestors(mother, depth + 1)
-    
-    def add_descendants(person_name, depth=0):
-        if person_name not in family_dict or depth >= child_depth:
-            return
-        
-        children = [member for member in family_data if member['father'] == person_name or member['mother'] == person_name]
-        sorted_children = sort_children(children)
-        
-        for child in sorted_children:
-            child_name = child['name']
-            father = child['father']
-            mother = child['mother']
-            
-            if father and mother:
-                parent_node = f"{father}_{mother}"
-                connections.add(f"{parent_node}(( ))")  # 中間ノード
-                father_data = next((p for p in family_data if p['name'] == father), {'name': father, 'gender': 'オス'})
-                mother_data = next((p for p in family_data if p['name'] == mother), {'name': mother, 'gender': 'メス'})
-                connections.add(f"{add_person_node(father_data)} --> {parent_node}")
-                connections.add(f"{add_person_node(mother_data)} --> {parent_node}")
-            else:
-                parent_node = f"{father or mother}_child"
-                connections.add(f"{parent_node}(( ))")  # 中間ノード
-                parent_data = next((p for p in family_data if p['name'] == (father or mother)), 
-                                 {'name': father or mother, 'gender': 'オス' if father else 'メス'})
-                connections.add(f"{add_person_node(parent_data)} --> {parent_node}")
-            
-            connections.add(f"{parent_node} --> {add_person_node(child)}")
-            add_descendants(child_name, depth + 1)
-    
-    if root_name:
-        add_ancestors(root_name)
-        add_descendants(root_name)
-    
-    # スタイル定義を追加
-    mermaid_code += "\nclassDef gender_オス stroke:blue,stroke-width:2px;\n"
-    mermaid_code += "classDef gender_メス stroke:pink,stroke-width:2px;\n"
-    
-    mermaid_code += "\n".join(connections)
-    return mermaid_code
-
-def create_gantt_chart(tasks, zoo_name):
-    """
-    Create a Gantt chart from a list of tasks.
-    Each task should be a dictionary with 'Task', 'Start', 'End', 'Status', and 'Zoo' keys.
-    """
-    # 個体数に応じて図の高さを動的に調整
-    num_tasks = len(tasks)
-    base_height = 6  # 基本の高さ
-    height_per_task = 0.4  # 1個体あたりの高さ
-    min_height = 4  # 最小の高さ
-    max_height = 20  # 最大の高さ
-    
-    # 個体数に基づいて高さを計算
-    calculated_height = base_height + (num_tasks * height_per_task)
-    # 最小・最大値の範囲内に制限
-    fig_height = max(min_height, min(calculated_height, max_height))
-    
-    fig, ax = plt.subplots(figsize=(12, fig_height))
-    
-    # Sort tasks by start date
-    tasks = sorted(tasks, key=lambda x: x['Start'])
-    
-    # Create y-axis labels (task names)
-    y_labels = [task['Task'] for task in tasks]
-    
-    # Calculate task durations
-    durations = [(task['End'] - task['Start']).days for task in tasks]
-    
-    # Calculate start positions (days from the earliest start date)
-    min_start = min(task['Start'] for task in tasks)
-    start_positions = [(task['Start'] - min_start).days for task in tasks]
-    
-    # Define colors based on zoo
-    unique_zoos = sorted(set(task['Zoo'] for task in tasks))
-    colors = plt.cm.Set3(np.linspace(0, 1, len(unique_zoos)))
-    zoo_colors = dict(zip(unique_zoos, colors))
-    
-    # Create horizontal bars
-    bars = ax.barh(y_labels, durations, left=start_positions, 
-                  color=[zoo_colors[task['Zoo']] for task in tasks])
-    
-    # Add task labels
-    for i, bar in enumerate(bars):
-        width = bar.get_width()
-        ax.text(bar.get_x() + width/2, bar.get_y() + bar.get_height()/2,
-                f"{tasks[i]['Zoo']}", ha='center', va='center')
-    
-    # Set x-axis to show dates
-    date_range = (min_start, max(task['End'] for task in tasks))
-    date_delta = (date_range[1] - date_range[0]).days
-    
-    # Generate date ticks every year
-    current_date = min_start
-    date_ticks = []
-    while current_date <= date_range[1]:
-        date_ticks.append(current_date)
-        # Add 1 year (365 days)
-        current_date = current_date + timedelta(days=365)
-    
-    ax.set_xticks([(d - min_start).days for d in date_ticks])
-    ax.set_xticklabels([d.strftime('%Y-%m-%d') for d in date_ticks], rotation=45)
-    
-    # Add grid and labels
-    ax.grid(True, axis='x')
-    ax.set_xlabel('Date')
-    ax.set_ylabel('Name')
-    ax.set_title(f'Zoo Transitions for {zoo_name}')
-    
-    # Add legend for zoos
-    legend_elements = [plt.Rectangle((0,0),1,1, facecolor=color) for color in colors]
-    ax.legend(legend_elements, unique_zoos, title='Zoos', loc='center left', bbox_to_anchor=(1.0, 0.5))
-    
-    # Adjust layout to prevent label cutoff
-    plt.tight_layout()
-    
-    return fig
-
-def find_oldest_ancestors(df, individual_name):
-    """
-    Find the oldest ancestors for a given individual using a directed graph.
-    Returns a list of tuples (ancestor_name, weight) where weight is based on generation level.
-    """
-    # Create a directed graph
-    G = nx.DiGraph()
-    
-    # Add edges from parents to children
-    for _, row in df.iterrows():
-        if pd.notna(row['father']):
-            G.add_edge(row['father'], row['name'])
-        if pd.notna(row['mother']):
-            G.add_edge(row['mother'], row['name'])
-    
-    # Find all ancestors using networkx
-    ancestors = nx.ancestors(G, individual_name)
-    
-    # Find the oldest ancestors (those with no parents in the dataset)
-    oldest_ancestors = []
-    for ancestor in ancestors:
-        if ancestor == '':
-            continue
-        # Check if this ancestor has any parents in the dataset
-        has_parents = False
-        for _, row in df.iterrows():
-            if row['name'] == ancestor:
-                if row['father'] != '' or row['mother'] != '':
-                    has_parents = True
-                break
-        if not has_parents:
-            # Calculate the weight based on the shortest path length (generation level)
-            path_length = len(nx.shortest_path(G, ancestor, individual_name)) - 1
-            weight = 0.5 ** path_length
-            oldest_ancestors.append((ancestor, weight))
-    
-    return oldest_ancestors
-
-def plot_genetic_distribution(df, ancestors):
-    """
-    Plot the genetic distribution of the oldest ancestors with weights.
-    """
-    # Count the weighted number of ancestors from each zoo
-    zoo_counts = {}
-    for ancestor, weight in ancestors:
-        ancestor_data = df[df['name'] == ancestor]
-        if not ancestor_data.empty:
-            birth_zoo = ancestor_data.iloc[0]['cur_zoo']
-            zoo_counts[birth_zoo] = zoo_counts.get(birth_zoo, 0) + weight
-    
-    # Create a pie chart
-    fig, ax = plt.subplots(figsize=(10, 8))
-    if zoo_counts:
-        labels = list(zoo_counts.keys())
-        sizes = list(zoo_counts.values())
-        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
-        ax.axis('equal')
-        ax.set_title('Weighted Genetic Distribution of Oldest Ancestors')
-    else:
-        ax.text(0.5, 0.5, 'No ancestor data available', 
-                horizontalalignment='center', verticalalignment='center')
-        ax.set_title('Genetic Distribution')
-    
-    return fig
-
+# Zoo coordinates for map visualization
 def get_zoo_coordinates():
     """日本の主要動物園の座標を返す"""
     zoo_coords = {
@@ -619,25 +153,15 @@ with ppy:
     elif uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
     sel_date = st.date_input("日付を選んでください", date.today(), min_value=date(2005, 1, 1), max_value=date.today())
-    df = df[~df['cur_zoo'].isin(['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ'])]
+    df = df[~df['cur_zoo'].isin(get_foreign_zoos())]
     live_df = df[df['deaddate'].isnull()].copy()
     dead_df = df[~df['deaddate'].isnull()].copy()
-    # 日付の変換とデータのクレンジング
-    def convert_date(date_str):
-        try:
-          if type(date_str) is str:
-            return datetime.strptime(date_str, '%Y年%m月%d日').date()
-          else:
-            return date(1980, 1, 1)
-        except ValueError:
-          return date(1980, 1, 1)
     
     live_df['birthdate'] = pd.to_datetime(live_df['birthdate'].apply(convert_date))
     live_df['deaddate'] = pd.to_datetime(live_df['deaddate'].apply(convert_date))
     dead_df['birthdate'] = pd.to_datetime(dead_df['birthdate'].apply(convert_date))
     dead_df['deaddate'] = pd.to_datetime(dead_df['deaddate'].apply(convert_date))
 
-    
     # 2003年1月1日以降のデータのみ抽出
     live_df = live_df[live_df['birthdate'] >= pd.Timestamp('2003-01-01')]
     
@@ -683,45 +207,16 @@ with gantt:
         df = pd.read_csv(default_csv_path)
     elif uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
+    
+    df = prepare_gantt_dataframe(df)
     live_df = df[df['deaddate'].isnull()].copy()
     dead_df = df[~df['deaddate'].isnull()].copy()
-    # 日付の変換とデータのクレンジング
-    def convert_date(date_str):
-        try:
-          if type(date_str) is str:
-            return datetime.strptime(date_str, '%Y年%m月%d日').date()
-          else:
-            return date.today()
-        except ValueError:
-          return date(1980, 1, 1)
-    def convert_date_through(date_str):
-        try:
-          if type(date_str) is str:
-            return datetime.strptime(date_str, '%Y年%m月%d日').date()
-          else:
-            return None
-        except ValueError:
-          return None
-    
-    live_df['birthdate'] = pd.to_datetime(live_df['birthdate'].apply(convert_date))
-    live_df['deaddate'] = pd.to_datetime(live_df['deaddate'].apply(convert_date))
-    live_df['move_date1'] = pd.to_datetime(live_df['move_date1'].apply(convert_date_through))
-    live_df['move_date2'] = pd.to_datetime(live_df['move_date2'].apply(convert_date_through))
-    live_df['move_date3'] = pd.to_datetime(live_df['move_date3'].apply(convert_date_through))
-    dead_df['birthdate'] = pd.to_datetime(dead_df['birthdate'].apply(convert_date))
-    dead_df['deaddate'] = pd.to_datetime(dead_df['deaddate'].apply(convert_date))
-    dead_df['move_date1'] = pd.to_datetime(dead_df['move_date1'].apply(convert_date_through))
-    dead_df['move_date2'] = pd.to_datetime(dead_df['move_date2'].apply(convert_date_through))
-    dead_df['move_date3'] = pd.to_datetime(dead_df['move_date3'].apply(convert_date_through))
 
     # 2003年1月1日以降のデータのみ抽出
     live_df = live_df[live_df['birthdate'] >= pd.Timestamp('2003-01-01')]
     
     df = pd.concat([live_df, dead_df])
-    df['father'] = df['father'].apply(clean_name)
-    df['mother'] = df['mother'].apply(clean_name)
-    zoo_options = list(set(df['birth_zoo'].unique()) | set(df['move_zoo1'].dropna().unique()) | 
-                      set(df['move_zoo2'].dropna().unique()) | set(df['move_zoo3'].dropna().unique()))
+    zoo_options = get_zoo_options(df)
     zoo_name = st.selectbox("Zoo Name", [""] + sorted(zoo_options))
 
     if zoo_name:
@@ -917,13 +412,13 @@ with genetic:
         df = pd.read_csv(default_csv_path)
     elif uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-    df['father'] = df['father'].apply(clean_name)
-    df['mother'] = df['mother'].apply(clean_name)
+    
+    df = prepare_dataframe_for_analysis(df)
     
     # Use the same DataFrame as in the Gantt chart tab
     if df.shape[0] > 0:
         # Select an individual
-        individual_options = list(df['name'].unique())
+        individual_options = get_individual_options(df)
         selected_individual = st.selectbox("Select Individual", [""] + individual_options)
         
         if selected_individual:
@@ -953,16 +448,6 @@ with death_age:
         df = pd.read_csv(default_csv_path)
     elif uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-    
-    # 日付の変換とデータのクレンジング
-    def convert_date(date_str):
-        try:
-            if type(date_str) is str:
-                return datetime.strptime(date_str, '%Y年%m月%d日').date()
-            else:
-                return None
-        except ValueError:
-            return None
     
     # 死亡日と誕生日を日付型に変換
     df['birthdate'] = pd.to_datetime(df['birthdate'].apply(convert_date))
@@ -1143,7 +628,7 @@ with relationship:
         
         if df.shape[0] > 0:
             # 個体名のリストを取得
-            individual_options = list(df['name'].unique())
+            individual_options = get_individual_options(df)
             
             # 2つの個体を選択
             col1, col2 = st.columns(2)
@@ -1302,16 +787,6 @@ with birthday:
     elif uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
     
-    # 日付の変換とデータのクレンジング
-    def convert_date(date_str):
-        try:
-            if type(date_str) is str:
-                return datetime.strptime(date_str, '%Y年%m月%d日').date()
-            else:
-                return None
-        except ValueError:
-            return None
-    
     # 誕生日を日付型に変換
     df['birthdate'] = pd.to_datetime(df['birthdate'].apply(convert_date))
     
@@ -1319,8 +794,7 @@ with birthday:
     live_df = df[df['deaddate'].isna()].copy()
     
     # 日本以外の動物園に所属している個体を除外
-    foreign_zoos = ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ']
-    japan_df = live_df[~live_df['cur_zoo'].isin(foreign_zoos)].copy()
+    japan_df = live_df[~live_df['cur_zoo'].isin(get_foreign_zoos())].copy()
     
     # 現在の年の誕生日イベントを作成
     current_year = datetime.now().year
@@ -1358,7 +832,6 @@ with birthday:
     
     # カレンダーを表示
     calendar_events = calendar(events=events, options=calendar_options, key="birthday_calendar")
-    #st.write(calendar_events)
     
     # 今月の誕生日一覧を表示
     current_month = datetime.now().month
@@ -1387,8 +860,7 @@ with map_view:
     live_df = df[df['deaddate'].isna()].copy()
     
     # 日本以外の動物園に所属している個体を除外
-    foreign_zoos = ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ']
-    japan_df = live_df[~live_df['cur_zoo'].isin(foreign_zoos)].copy()
+    japan_df = live_df[~live_df['cur_zoo'].isin(get_foreign_zoos())].copy()
     
     if not japan_df.empty:
         # 動物園の座標を取得
@@ -1491,6 +963,7 @@ with map_view:
 
 with genetic_distance:
     st.title("Genetic Distance Between Individuals")
+    
     # CSVファイルの読み込み
     if use_default and os.path.exists(default_csv_path):
         df = pd.read_csv(default_csv_path)
@@ -1498,92 +971,56 @@ with genetic_distance:
         df = pd.read_csv(uploaded_file)
     else:
         df = None
+    
     if df is not None and df.shape[0] > 0:
-        df['father'] = df['father'].apply(clean_name)
-        df['mother'] = df['mother'].apply(clean_name)
-        # 生存個体のみ抽出
-        live_df = df[df['deaddate'].isna()].copy()
-        if live_df.empty:
-            st.warning("No living individuals available for genetic distance analysis.")
+        df = prepare_dataframe_for_analysis(df)
+        
+        # 日本にいる生存個体をフィルタリング
+        japan_df = filter_japan_living_individuals(df)
+        
+        if japan_df is None:
+            st.warning("No living individuals in Japan available for genetic distance analysis.")
         else:
-            # 日本以外の動物園に所属している個体を除外
-            foreign_zoos = ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ']
-            japan_df = live_df[~live_df['cur_zoo'].isin(foreign_zoos)].copy()
-            if japan_df.empty:
-                st.warning("No living individuals in Japan available for genetic distance analysis.")
-            else:
-                # 年齢計算のための日付変換
-                def convert_date(date_str):
-                    try:
-                        if type(date_str) is str:
-                            return datetime.strptime(date_str, '%Y年%m月%d日').date()
-                        else:
-                            return None
-                    except ValueError:
-                        return None
-                japan_df['birthdate'] = pd.to_datetime(japan_df['birthdate'].apply(convert_date))
-                # 現在の年齢を計算
-                today = pd.Timestamp.now()
-                japan_df['age'] = (today - japan_df['birthdate']).dt.days // 365
-                individual_options = list(japan_df['name'].unique())
-                selected_individual = st.selectbox("Select Individual for Genetic Distance", [""] + individual_options, key="genetic_distance_select")
-                if selected_individual:
-                    selected_row = japan_df[japan_df['name'] == selected_individual]
-                    if selected_row.empty:
-                        st.warning("Selected individual not found among living individuals in Japan.")
-                    else:
-                        selected_gender = selected_row.iloc[0]['gender']
-                        # 反対の性別を決定
-                        opposite_gender = 'メス' if selected_gender == 'オス' else 'オス'
-                        # 計算対象: 日本に生存、反対の性別、9歳以下
-                        candidates_df = japan_df[(japan_df['gender'] == opposite_gender) & (japan_df['age'] <= 9)]
-                        candidate_names = list(candidates_df['name'].unique())
-                        if not candidate_names:
-                            st.warning(f"No living {opposite_gender} individuals aged 9 or younger found in Japan.")
-                        else:
-                            # 1. 全個体の遺伝子ベクトルを作成
-                            zoo_set = set(df['cur_zoo'].dropna().unique())
-                            zoo_list = sorted(list(zoo_set))
-                            zoo_index = {z: i for i, z in enumerate(zoo_list)}
-                            def get_gene_vector(ind_name):
-                                ancestors = find_oldest_ancestors(df, ind_name)
-                                vec = np.zeros(len(zoo_list))
-                                for ancestor, weight in ancestors:
-                                    ancestor_data = df[df['name'] == ancestor]
-                                    if not ancestor_data.empty:
-                                        zoo = ancestor_data.iloc[0]['cur_zoo']
-                                        if zoo in zoo_index:
-                                            vec[zoo_index[zoo]] += weight
-                                return vec
-                            # 指定個体の遺伝子ベクトル
-                            target_vec = get_gene_vector(selected_individual)
-                            # 2. 他の個体との距離を計算
-                            distances = []
-                            for name in candidate_names:
-                                if name == selected_individual:
-                                    continue
-                                vec = get_gene_vector(name)
-                                dist = np.linalg.norm(target_vec - vec)
-                                # 年齢も取得
-                                age = candidates_df[candidates_df['name'] == name].iloc[0]['age']
-                                distances.append((name, dist, age))
-                            # 3. 距離が遠い順にソート
-                            distances.sort(key=lambda x: -x[1])
-                            st.write(f"Top 5 living {opposite_gender} individuals (aged 9 or younger) with the largest genetic distance from {selected_individual}:")
-                            for i, (name, dist, age) in enumerate(distances[:5], 1):
-                                st.write(f"{i}. {name} (Age: {age}, Genetic Distance: {dist:.4f})")
-                            # オプション: 距離の分布をヒストグラムで表示
-                            if distances:
-                                st.write("\n#### Genetic Distance Distribution (all candidates)")
-                                import matplotlib.pyplot as plt
-                                fig, ax = plt.subplots(figsize=(8, 4))
-                                ax.hist([d[1] for d in distances], bins=20, color='gray', alpha=0.7)
-                                ax.set_xlabel('Genetic Distance')
-                                ax.set_ylabel('Count')
-                                ax.set_title('Distribution of Genetic Distances')
-                                st.pyplot(fig)
+            individual_options = get_individual_options(japan_df)
+            selected_individual = st.selectbox(
+                "Select Individual for Genetic Distance", 
+                [""] + individual_options, 
+                key="genetic_distance_select"
+            )
+            
+            if selected_individual:
+                selected_row = japan_df[japan_df['name'] == selected_individual]
+                if selected_row.empty:
+                    st.warning("Selected individual not found among living individuals in Japan.")
                 else:
-                    st.info("Please select a living individual in Japan to calculate genetic distances.")
+                    selected_gender = selected_row.iloc[0]['gender']
+                    
+                    # 反対の性別で9歳以下の候補者を取得
+                    candidates_df, opposite_gender = get_opposite_gender_candidates(japan_df, selected_gender, max_age=9)
+                    
+                    if candidates_df.empty:
+                        st.warning(f"No living {opposite_gender} individuals aged 9 or younger found in Japan.")
+                    else:
+                        # 遺伝子ベクトル計算のための準備
+                        zoo_set = set(df['cur_zoo'].dropna().unique())
+                        zoo_list = sorted(list(zoo_set))
+                        zoo_index = {z: i for i, z in enumerate(zoo_list)}
+                        
+                        # 遺伝子的距離を計算
+                        distances = calculate_genetic_distances(df, selected_individual, candidates_df, zoo_list, zoo_index)
+                        
+                        # 結果を表示
+                        st.write(f"Top 5 living {opposite_gender} individuals (aged 9 or younger) with the largest genetic distance from {selected_individual}:")
+                        for i, (name, dist, age) in enumerate(distances[:5], 1):
+                            st.write(f"{i}. {name} (Age: {age}, Genetic Distance: {dist:.4f})")
+                        
+                        # 距離分布のヒストグラムを表示
+                        if distances:
+                            st.write("\n#### Genetic Distance Distribution (all candidates)")
+                            fig = plot_distance_distribution(distances)
+                            st.pyplot(fig)
+            else:
+                st.info("Please select a living individual in Japan to calculate genetic distances.")
     else:
         st.warning("No data available for genetic distance analysis.")
 
