@@ -132,7 +132,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance"])
+tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -1023,4 +1023,49 @@ with genetic_distance:
                 st.info("Please select a living individual in Japan to calculate genetic distances.")
     else:
         st.warning("No data available for genetic distance analysis.")
+
+with birth_death_stats:
+    st.title("Yearly Births and Deaths")
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = None
+    if df is not None and df.shape[0] > 0:
+        # 日本の個体だけに限定
+        japan_df = df[~df['cur_zoo'].isin(get_foreign_zoos())].copy()
+        # 日付の変換
+        japan_df['birthdate'] = pd.to_datetime(japan_df['birthdate'].apply(convert_date))
+        japan_df['deaddate'] = pd.to_datetime(japan_df['deaddate'].apply(convert_date))
+        # 2000年以降に限定
+        japan_df = japan_df[(japan_df['birthdate'].dt.year >= 2000) | (japan_df['deaddate'].dt.year >= 2000)]
+        # 年ごとに集計
+        birth_years = japan_df['birthdate'].dt.year.dropna().astype(int)
+        death_years = japan_df['deaddate'].dt.year.dropna().astype(int)
+        birth_counts = birth_years.value_counts().sort_index()
+        death_counts = death_years.value_counts().sort_index()
+        # 年の範囲を決定
+        all_years = [y for y in sorted(set(birth_counts.index).union(set(death_counts.index))) if y >= 2000]
+        birth_vals = [birth_counts.get(y, 0) for y in all_years]
+        death_vals = [death_counts.get(y, 0) for y in all_years]
+        # 棒グラフ
+        fig, ax = plt.subplots(figsize=(12, 6))
+        width = 0.4
+        ax.bar([y - width/2 for y in all_years], birth_vals, width=width, label='Births', color='skyblue')
+        ax.bar([y + width/2 for y in all_years], death_vals, width=width, label='Deaths', color='salmon')
+        ax.set_xlabel('Year')
+        ax.set_ylabel('Count')
+        ax.set_title('Yearly Births and Deaths (Japan Only, 2000-)')
+        ax.legend()
+        ax.set_xticks(all_years)
+        ax.set_xticklabels([str(y) for y in all_years], rotation=45)
+        # 5ごとにグリッドライン
+        max_count = max(birth_vals + death_vals) if (birth_vals + death_vals) else 0
+        ax.set_yticks(np.arange(0, max_count + 6, 5))
+        ax.yaxis.grid(True, which='major', linestyle='--', color='gray', alpha=0.7)
+        st.pyplot(fig)
+    else:
+        st.warning("No data available for birth/death statistics.")
 
