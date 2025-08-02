@@ -5,7 +5,7 @@ Visualization functions for the Red Panda Family Tree application
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from datetime import timedelta
+from datetime import timedelta, datetime
 from utils import get_year_range, OrderedSet, is_url
 
 

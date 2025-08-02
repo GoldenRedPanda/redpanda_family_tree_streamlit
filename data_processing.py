@@ -5,7 +5,7 @@ Data processing functions for the Red Panda Family Tree application
 import csv
 import pandas as pd
 from datetime import datetime
-from utils import escape_mermaid, clean_name, convert_date, convert_date_through
+from utils import escape_mermaid, clean_name, convert_date, convert_date_through, convert_date_fallback
 
 
 def read_csv(file_path):
@@ -18,6 +18,12 @@ def read_csv(file_path):
             row['father'] = escape_mermaid(clean_name(row['father']))
             row['mother'] = escape_mermaid(clean_name(row['mother']))
             row['birthdate'] = row['birthdate'] if 'birthdate' in row else ''
+            row['deaddate'] = row['deaddate'] if 'deaddate' in row else ''
+            row['birth_zoo'] = row['birth_zoo'] if 'birth_zoo' in row else ''
+            row['move_zoo1'] = row['move_zoo1'] if 'move_zoo1' in row else ''
+            row['move_zoo2'] = row['move_zoo2'] if 'move_zoo2' in row else ''
+            row['move_zoo3'] = row['move_zoo3'] if 'move_zoo3' in row else ''
+            row['cur_zoo'] = row['cur_zoo'] if 'cur_zoo' in row else ''
             row['gender'] = row['gender'] if 'gender' in row else 'オス'
             row['image'] = row['image'] if 'image' in row else ''
             family_data.append(row)
@@ -61,8 +67,8 @@ def prepare_gantt_dataframe(df):
     df['mother'] = df['mother'].apply(clean_name)
     
     # Convert all date columns
-    df['birthdate'] = pd.to_datetime(df['birthdate'].apply(convert_date))
-    df['deaddate'] = pd.to_datetime(df['deaddate'].apply(convert_date))
+    df['birthdate'] = pd.to_datetime(df['birthdate'].apply(convert_date_fallback))
+    df['deaddate'] = pd.to_datetime(df['deaddate'].apply(convert_date_fallback))
     df['move_date1'] = pd.to_datetime(df['move_date1'].apply(convert_date_through))
     df['move_date2'] = pd.to_datetime(df['move_date2'].apply(convert_date_through))
     df['move_date3'] = pd.to_datetime(df['move_date3'].apply(convert_date_through))

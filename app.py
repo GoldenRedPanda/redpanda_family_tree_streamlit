@@ -207,10 +207,11 @@ with gantt:
         df = pd.read_csv(default_csv_path)
     elif uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-    
-    df = prepare_gantt_dataframe(df)
     live_df = df[df['deaddate'].isnull()].copy()
     dead_df = df[~df['deaddate'].isnull()].copy()
+    live_df = prepare_gantt_dataframe(live_df)
+    dead_df = prepare_gantt_dataframe(dead_df)
+    
 
     # 2003年1月1日以降のデータのみ抽出
     live_df = live_df[live_df['birthdate'] >= pd.Timestamp('2003-01-01')]

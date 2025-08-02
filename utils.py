@@ -7,7 +7,7 @@ import zlib
 import base64
 import json
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from urllib.parse import urlparse
 from collections import OrderedDict
 
@@ -96,6 +96,15 @@ def convert_date(date_str):
     except ValueError:
         return None
 
+def convert_date_fallback(date_str):
+    """Convert date string to datetime object with fallback to today"""
+    try:
+        if type(date_str) is str:
+            return datetime.strptime(date_str, '%Y年%m月%d日').date()
+        else:
+            return date.today()
+    except ValueError:
+        return date(1980, 1, 1)
 
 def convert_date_through(date_str):
     """Convert date string with fallback to today"""
@@ -103,9 +112,9 @@ def convert_date_through(date_str):
         if type(date_str) is str:
             return datetime.strptime(date_str, '%Y年%m月%d日').date()
         else:
-            return datetime.now().date()
+            return None
     except ValueError:
-        return datetime.now().date()
+        return None
 
 
 def get_year_range(person):
