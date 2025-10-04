@@ -132,7 +132,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats"])
+tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats, survival_timeline = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats", "Survival Timeline"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -1069,4 +1069,130 @@ with birth_death_stats:
         st.pyplot(fig)
     else:
         st.warning("No data available for birth/death statistics.")
+
+with survival_timeline:
+    st.title("Survival Timeline - Living Individuals in Japan")
+    
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = None
+    
+    if df is not None and df.shape[0] > 0:
+        # 日本の個体だけに限定（外国の動物園を除外）
+        japan_df = df[~df['cur_zoo'].isin(get_foreign_zoos())].copy()
+        
+        # 日付の変換
+        japan_df['birthdate'] = pd.to_datetime(japan_df['birthdate'].apply(convert_date))
+        japan_df['deaddate'] = pd.to_datetime(japan_df['deaddate'].apply(convert_date))
+        
+        # 2000年1月1日から現在までの月ごとの日付を生成
+        start_date = pd.Timestamp('2000-01-01')
+        end_date = pd.Timestamp.now()
+        
+        # 月ごとの日付リストを作成（各月の1日）
+        monthly_dates = pd.date_range(start=start_date, end=end_date, freq='MS')  # MS = Month Start
+        
+        # 各月での生存個体数を計算
+        survival_counts = []
+        survival_dates = []
+        
+        for month_date in monthly_dates:
+            # その月の1日時点での生存個体数を計算
+            # 条件: 誕生日がその月以前 かつ (死亡日がその月以降 または 死亡日がnull)
+            living_at_date = japan_df[
+                (japan_df['birthdate'] <= month_date) & 
+                ((japan_df['deaddate'].isna()) | (japan_df['deaddate'] > month_date))
+            ]
+            
+            survival_counts.append(len(living_at_date))
+            survival_dates.append(month_date)
+        
+        # グラフの作成
+        fig, ax = plt.subplots(figsize=(14, 8))
+        
+        # 線グラフでプロット
+        ax.plot(survival_dates, survival_counts, linewidth=2, color='green', marker='o', markersize=3)
+        
+        # グラフの装飾
+        ax.set_xlabel('Date', fontsize=12)
+        ax.set_ylabel('Number of Living Individuals', fontsize=12)
+        ax.set_title('Timeline of Living Individuals in Japan (2000-Present)', fontsize=14, fontweight='bold')
+        
+        # グリッドの追加
+        ax.grid(True, alpha=0.3)
+        
+        # X軸の目盛りを月ごとに設定
+        ax.xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=6))  # 6ヶ月ごと
+        ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%Y-%m'))
+        
+        # X軸のラベルを回転
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+        
+        # Y軸の範囲を調整
+        if survival_counts:
+            max_count = max(survival_counts)
+            min_count = min(survival_counts)
+            margin = (max_count - min_count) * 0.1 if max_count != min_count else 1
+            ax.set_ylim(max(0, min_count - margin), max_count + margin)
+        
+        # レイアウトの調整
+        plt.tight_layout()
+        
+        # グラフを表示
+        st.pyplot(fig)
+        
+        # 統計情報の表示
+        st.write("### Statistics")
+        
+        if survival_counts:
+            st.write(f"**Maximum population**: {max(survival_counts)} individuals")
+            st.write(f"**Minimum population**: {min(survival_counts)} individuals")
+            st.write(f"**Current population**: {survival_counts[-1]} individuals")
+            
+            # 最大・最小の日付を特定
+            max_idx = survival_counts.index(max(survival_counts))
+            min_idx = survival_counts.index(min(survival_counts))
+            
+            st.write(f"**Peak population date**: {survival_dates[max_idx].strftime('%Y-%m')} ({max(survival_counts)} individuals)")
+            st.write(f"**Lowest population date**: {survival_dates[min_idx].strftime('%Y-%m')} ({min(survival_counts)} individuals)")
+            
+            # 最近の傾向（過去12ヶ月）
+            if len(survival_counts) >= 12:
+                recent_counts = survival_counts[-12:]
+                recent_dates = survival_dates[-12:]
+                
+                # 線形回帰で傾向を計算
+                x_numeric = np.arange(len(recent_counts))
+                slope, intercept = np.polyfit(x_numeric, recent_counts, 1)
+                
+                st.write("### Recent Trend (Past 12 Months)")
+                if slope > 0:
+                    st.write(f"📈 **Increasing trend**: +{slope:.1f} individuals per month")
+                elif slope < 0:
+                    st.write(f"📉 **Decreasing trend**: {slope:.1f} individuals per month")
+                else:
+                    st.write("📊 **Stable trend**: No significant change")
+                
+                # 最近12ヶ月の詳細データを表示
+                st.write("**Monthly data (past 12 months):**")
+                for i, (date, count) in enumerate(zip(recent_dates, recent_counts)):
+                    st.write(f"- {date.strftime('%Y-%m')}: {count} individuals")
+        
+        # 説明文
+        st.write("### About This Chart")
+        st.write("""
+        This chart shows the number of living red pandas in Japan over time:
+        
+        - **X-axis**: Monthly dates from January 2000 to present
+        - **Y-axis**: Number of living individuals at each point in time
+        - **Data**: Only includes individuals in Japanese zoos (excludes foreign zoos)
+        - **Method**: Counts individuals who were born before or on the date and either died after the date or are still alive
+        """)
+        
+    else:
+        st.warning("No data available for survival timeline analysis.")
 
