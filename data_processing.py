@@ -11,7 +11,7 @@ from utils import escape_mermaid, clean_name, convert_date, convert_date_through
 def read_csv(file_path):
     """Read CSV file and return family data"""
     family_data = []
-    with open(file_path, newline='', encoding='utf-8') as csvfile:
+    with open(file_path, newline='', encoding='utf-8-sig') as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
             row['name'] = escape_mermaid(clean_name(row['name']))

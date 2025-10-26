@@ -124,7 +124,7 @@ def get_zoo_coordinates():
 st.title("Family Tree Generator")
 
 default_csv_path = "redpanda.csv"
-use_default = st.checkbox("Use default CSV file (family_data.csv in the same folder)", value=True)
+use_default = st.checkbox("Use default CSV file (redpanda.csv in the same folder)", value=True)
 uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
 data = None
 if use_default and os.path.exists(default_csv_path):
