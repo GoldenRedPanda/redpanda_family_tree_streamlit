@@ -1067,6 +1067,109 @@ with birth_death_stats:
         ax.set_yticks(np.arange(0, max_count + 6, 5))
         ax.yaxis.grid(True, which='major', linestyle='--', color='gray', alpha=0.7)
         st.pyplot(fig)
+        
+        # 指定された年の死亡個体の年齢分布
+        st.write("---")
+        st.subheader("Age Distribution of Deaths by Year")
+        
+        # 死亡記録があるデータを取得
+        death_df = japan_df[japan_df['deaddate'].notna()].copy()
+        
+        if not death_df.empty:
+            # 死亡年を計算
+            death_df['death_year'] = death_df['deaddate'].dt.year.astype(int)
+            
+            # 利用可能な年のリストを作成（2000年から今年まで）
+            current_year = datetime.now().year
+            available_years = sorted([y for y in death_df['death_year'].unique() if 2000 <= y <= current_year])
+            
+            if available_years:
+                # セレクトボックスで年を選択
+                selected_year = st.selectbox(
+                    "Select Year for Death Age Distribution",
+                    available_years,
+                    index=len(available_years) - 1 if available_years else 0,
+                    key="death_age_year_select"
+                )
+                
+                # 選択された年に死亡した個体をフィルタリング
+                year_deaths = death_df[death_df['death_year'] == selected_year].copy()
+                
+                if not year_deaths.empty:
+                    # 死亡時の年齢を計算
+                    year_deaths['death_age'] = (year_deaths['deaddate'] - year_deaths['birthdate']).dt.days / 365.25
+                    
+                    # 年齢分布のヒストグラムを作成
+                    fig2, ax2 = plt.subplots(figsize=(12, 6))
+                    
+                    # 年齢の範囲を設定
+                    max_age = int(year_deaths['death_age'].max()) + 1
+                    bins = range(0, max_age + 1)
+                    
+                    # 性別ごとにヒストグラムを作成
+                    male_data = year_deaths[year_deaths['gender'] == 'オス']['death_age']
+                    female_data = year_deaths[year_deaths['gender'] == 'メス']['death_age']
+                    
+                    # データがある場合のみプロット
+                    plot_data = []
+                    plot_labels = []
+                    plot_colors = []
+                    
+                    if not male_data.empty:
+                        plot_data.append(male_data)
+                        plot_labels.append('Male')
+                        plot_colors.append('skyblue')
+                    
+                    if not female_data.empty:
+                        plot_data.append(female_data)
+                        plot_labels.append('Female')
+                        plot_colors.append('lightpink')
+                    
+                    if plot_data:
+                        ax2.hist(plot_data, bins=bins, alpha=0.7, label=plot_labels, color=plot_colors, edgecolor='black')
+                    
+                    # グラフの装飾
+                    ax2.set_xlabel('Age at Death (years)', fontsize=12)
+                    ax2.set_ylabel('Number of Individuals', fontsize=12)
+                    ax2.set_title(f'Age Distribution of Deaths in {selected_year}', fontsize=14, fontweight='bold')
+                    ax2.legend()
+                    ax2.grid(True, alpha=0.3)
+                    
+                    # X軸の目盛りを設定
+                    ax2.set_xticks(range(0, max_age + 1, 2))  # 2歳ごと
+                    
+                    # レイアウトの調整
+                    plt.tight_layout()
+                    
+                    # グラフを表示
+                    st.pyplot(fig2)
+                    
+                    # 統計情報の表示
+                    st.write(f"### Statistics for {selected_year}")
+                    st.write(f"**Total deaths**: {len(year_deaths)} individuals")
+                    st.write(f"**Average age at death**: {year_deaths['death_age'].mean():.1f} years")
+                    st.write(f"**Median age at death**: {year_deaths['death_age'].median():.1f} years")
+                    st.write(f"**Minimum age at death**: {year_deaths['death_age'].min():.1f} years")
+                    st.write(f"**Maximum age at death**: {year_deaths['death_age'].max():.1f} years")
+                    
+                    # 性別ごとの統計情報
+                    if not male_data.empty:
+                        st.write("**Male Statistics:**")
+                        st.write(f"- Count: {len(male_data)}")
+                        st.write(f"- Average age: {male_data.mean():.1f} years")
+                        st.write(f"- Median age: {male_data.median():.1f} years")
+                    
+                    if not female_data.empty:
+                        st.write("**Female Statistics:**")
+                        st.write(f"- Count: {len(female_data)}")
+                        st.write(f"- Average age: {female_data.mean():.1f} years")
+                        st.write(f"- Median age: {female_data.median():.1f} years")
+                else:
+                    st.info(f"No death records found for {selected_year}.")
+            else:
+                st.info("No death records available for years between 2000 and the current year.")
+        else:
+            st.info("No death records found in the dataset.")
     else:
         st.warning("No data available for birth/death statistics.")
 
