@@ -5,7 +5,7 @@ Data processing functions for the Red Panda Family Tree application
 import csv
 import pandas as pd
 from datetime import datetime
-from utils import escape_mermaid, clean_name, convert_date, convert_date_through, convert_date_fallback
+from utils import escape_mermaid, clean_name, convert_date, convert_date_through, convert_date_fallback, get_foreign_zoos
 
 
 def read_csv(file_path):
@@ -82,8 +82,15 @@ def get_individual_options(df):
 
 
 def get_zoo_options(df):
-    """Get list of zoo names for selection"""
-    return list(set(df['birth_zoo'].unique()) | 
+    """Get list of zoo names for selection (Japan only)"""
+    # Get all zoo names from various columns
+    all_zoos = set(df['birth_zoo'].dropna().unique()) | 
                set(df['move_zoo1'].dropna().unique()) | 
                set(df['move_zoo2'].dropna().unique()) | 
-               set(df['move_zoo3'].dropna().unique())) 
+               set(df['move_zoo3'].dropna().unique())
+    
+    # Exclude foreign zoos
+    foreign_zoos = set(get_foreign_zoos())
+    japan_zoos = all_zoos - foreign_zoos
+    
+    return list(japan_zoos) 
