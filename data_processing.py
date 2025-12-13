@@ -84,9 +84,9 @@ def get_individual_options(df):
 def get_zoo_options(df):
     """Get list of zoo names for selection (Japan only)"""
     # Get all zoo names from various columns
-    all_zoos = set(df['birth_zoo'].dropna().unique()) | 
-               set(df['move_zoo1'].dropna().unique()) | 
-               set(df['move_zoo2'].dropna().unique()) | 
+    all_zoos = set(df['birth_zoo'].dropna().unique()) | \
+               set(df['move_zoo1'].dropna().unique()) | \
+               set(df['move_zoo2'].dropna().unique()) | \
                set(df['move_zoo3'].dropna().unique())
     
     # Exclude foreign zoos
