@@ -207,7 +207,7 @@ with gantt:
         df = pd.read_csv(default_csv_path)
     elif uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-    live_df = df[df['deaddate'].isnull()].copy()_
+    live_df = df[df['deaddate'].isnull()].copy()
     dead_df = df[~df['deaddate'].isnull()].copy()
     live_df = prepare_gantt_dataframe(live_df)
     dead_df = prepare_gantt_dataframe(dead_df)
