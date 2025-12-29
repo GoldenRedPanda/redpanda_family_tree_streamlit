@@ -141,7 +141,11 @@ with tr:
     if data:
         name_options = [person['name'] for person in data]
         root_name = st.selectbox("Root Name", [""] + name_options)
-        mermaid_code = generate_mermaid(data, root_name if root_name else None, parent_depth, child_depth, show_images)
+        
+        # 引っ越し歴表示の切り替えボタン
+        show_moving_history = st.checkbox("Show Moving History", value=False)
+        
+        mermaid_code = generate_mermaid(data, root_name if root_name else None, parent_depth, child_depth, show_images, show_moving_history)
         st.text_area("Generated Mermaid Code", mermaid_code, height=300)
         url = mermaid_to_pako_url(mermaid_code)
         st.markdown(f"[Mermaid Live Editor で開く]({url})", unsafe_allow_html=True)
@@ -199,6 +203,39 @@ with ppy:
     ax.set_xticklabels([abs(x) for x in range(-max(male_counts), max(female_counts) + 1)])
     
     st.pyplot(fig)
+    
+    # 各年齢の個体名を表示（老齢から順に）
+    st.write("### 各年齢の個体名")
+    
+    # 年齢ごとに個体をグループ化
+    age_groups = {}
+    for _, row in sel_df.iterrows():
+        age = row['age']
+        if age not in age_groups:
+            age_groups[age] = {'male': [], 'female': []}
+        
+        if row['gender'] == 'オス':
+            age_groups[age]['male'].append(row['name'])
+        else:
+            age_groups[age]['female'].append(row['name'])
+    
+    # 年齢を降順でソート（老齢から）
+    sorted_ages = sorted(age_groups.keys(), reverse=True)
+    
+    for age in sorted_ages:
+        st.write(f"#### {age}歳")
+        
+        # オスとメスを分けて表示
+        males = age_groups[age]['male']
+        females = age_groups[age]['female']
+        
+        if males:
+            st.write(f"**オス ({len(males)}頭)**: {', '.join(males)}")
+        if females:
+            st.write(f"**メス ({len(females)}頭)**: {', '.join(females)}")
+        
+        if not males and not females:
+            st.write("該当個体なし")
 
 with gantt:
     st.title("Project Gantt Chart")
