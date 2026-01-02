@@ -132,7 +132,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats, survival_timeline = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats", "Survival Timeline"])
+tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats, survival_timeline, longevity_ranking = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats", "Survival Timeline", "Longevity Ranking"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
@@ -1335,4 +1335,169 @@ with survival_timeline:
         
     else:
         st.warning("No data available for survival timeline analysis.")
+
+with longevity_ranking:
+    st.title("Longevity Ranking - Top 20 Individuals in Japan")
+    
+    # CSVファイルの読み込み
+    if use_default and os.path.exists(default_csv_path):
+        df = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = None
+    
+    if df is not None and df.shape[0] > 0:
+        # 日本の個体だけに限定（外国の動物園を除外）
+        japan_df = df[~df['cur_zoo'].isin(get_foreign_zoos())].copy()
+        
+        # 日付の変換
+        japan_df['birthdate'] = pd.to_datetime(japan_df['birthdate'].apply(convert_date))
+        japan_df['deaddate'] = pd.to_datetime(japan_df['deaddate'].apply(convert_date))
+        
+        # 年齢を計算
+        today = pd.Timestamp.now()
+        
+        # 生存個体の年齢計算
+        live_df = japan_df[japan_df['deaddate'].isna()].copy()
+        live_df['age'] = (today - live_df['birthdate']).dt.days / 365.25
+        
+        # 死亡個体の年齢計算
+        dead_df = japan_df[japan_df['deaddate'].notna()].copy()
+        dead_df['age'] = (dead_df['deaddate'] - dead_df['birthdate']).dt.days / 365.25
+        
+        # 生存個体と死亡個体を結合
+        all_df = pd.concat([live_df, dead_df])
+        
+        # 年齢でソート（降順、老齢から）
+        all_df = all_df.sort_values('age', ascending=False)
+        
+        # 上位20位を取得
+        top_20 = all_df.head(20)
+        
+        if not top_20.empty:
+            st.write("### Top 20 Longest-Lived Individuals")
+            
+            # ランキング表を作成
+            ranking_data = []
+            for idx, row in top_20.iterrows():
+                rank = len(ranking_data) + 1
+                name = row['name']
+                age = row['age']
+                gender = row['gender']
+                birthdate = row['birthdate']
+                deaddate = row['deaddate']
+                cur_zoo = row.get('cur_zoo', '')
+                
+                # 生存状況
+                status = "生存中" if pd.isna(deaddate) else "死亡"
+                
+                # 誕生年と死亡年を取得
+                birth_year = birthdate.year if pd.notna(birthdate) else None
+                death_year = deaddate.year if pd.notna(deaddate) else None
+                
+                if birth_year and death_year:
+                    year_range = f"{birth_year}-{death_year}"
+                elif birth_year:
+                    year_range = f"{birth_year}-"
+                else:
+                    year_range = "-"
+                
+                ranking_data.append({
+                    'Rank': rank,
+                    'Name': name,
+                    'Age (years)': f"{age:.2f}",
+                    'Gender': gender,
+                    'Status': status,
+                    'Year Range': year_range,
+                    'Current Zoo': cur_zoo
+                })
+            
+            # データフレームを作成して表示
+            ranking_df = pd.DataFrame(ranking_data)
+            st.dataframe(ranking_df, use_container_width=True, hide_index=True)
+            
+            # 統計情報
+            st.write("### Statistics")
+            st.write(f"**Total individuals analyzed**: {len(all_df)}")
+            st.write(f"**Average age**: {all_df['age'].mean():.2f} years")
+            st.write(f"**Maximum age**: {all_df['age'].max():.2f} years")
+            st.write(f"**Minimum age**: {all_df['age'].min():.2f} years")
+            
+            # 生存個体と死亡個体の統計
+            st.write("### Statistics by Status")
+            live_ages = live_df['age'] if not live_df.empty else pd.Series(dtype=float)
+            dead_ages = dead_df['age'] if not dead_df.empty else pd.Series(dtype=float)
+            
+            if not live_ages.empty:
+                st.write("**Living Individuals:**")
+                st.write(f"- Count: {len(live_ages)}")
+                st.write(f"- Average age: {live_ages.mean():.2f} years")
+                st.write(f"- Maximum age: {live_ages.max():.2f} years")
+            
+            if not dead_ages.empty:
+                st.write("**Deceased Individuals:**")
+                st.write(f"- Count: {len(dead_ages)}")
+                st.write(f"- Average age at death: {dead_ages.mean():.2f} years")
+                st.write(f"- Maximum age at death: {dead_ages.max():.2f} years")
+            
+            # 性別ごとの統計
+            st.write("### Statistics by Gender")
+            male_df = all_df[all_df['gender'] == 'オス']
+            female_df = all_df[all_df['gender'] == 'メス']
+            
+            if not male_df.empty:
+                st.write("**Male (オス):**")
+                st.write(f"- Count: {len(male_df)}")
+                st.write(f"- Average age: {male_df['age'].mean():.2f} years")
+                st.write(f"- Maximum age: {male_df['age'].max():.2f} years")
+            
+            if not female_df.empty:
+                st.write("**Female (メス):**")
+                st.write(f"- Count: {len(female_df)}")
+                st.write(f"- Average age: {female_df['age'].mean():.2f} years")
+                st.write(f"- Maximum age: {female_df['age'].max():.2f} years")
+            
+            # グラフで可視化
+            st.write("### Age Distribution Chart")
+            fig, ax = plt.subplots(figsize=(12, 6))
+            
+            # 年齢の範囲を設定
+            max_age = int(all_df['age'].max()) + 1
+            bins = range(0, max_age + 1)
+            
+            # 性別ごとにヒストグラムを作成
+            male_data = all_df[all_df['gender'] == 'オス']['age']
+            female_data = all_df[all_df['gender'] == 'メス']['age']
+            
+            plot_data = []
+            plot_labels = []
+            plot_colors = []
+            
+            if not male_data.empty:
+                plot_data.append(male_data)
+                plot_labels.append('Male')
+                plot_colors.append('skyblue')
+            
+            if not female_data.empty:
+                plot_data.append(female_data)
+                plot_labels.append('Female')
+                plot_colors.append('lightpink')
+            
+            if plot_data:
+                ax.hist(plot_data, bins=bins, alpha=0.7, label=plot_labels, color=plot_colors, edgecolor='black')
+            
+            ax.set_xlabel('Age (years)', fontsize=12)
+            ax.set_ylabel('Number of Individuals', fontsize=12)
+            ax.set_title('Age Distribution of All Individuals in Japan', fontsize=14, fontweight='bold')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+        else:
+            st.warning("No individuals found for longevity ranking.")
+    else:
+        st.warning("No data available for longevity ranking analysis.")
 
