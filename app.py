@@ -1337,7 +1337,7 @@ with survival_timeline:
         st.warning("No data available for survival timeline analysis.")
 
 with longevity_ranking:
-    st.title("Longevity Ranking - Top 20 Individuals in Japan")
+    st.title("Longevity Ranking - Top 50 Individuals in Japan")
     
     # CSVファイルの読み込み
     if use_default and os.path.exists(default_csv_path):
@@ -1372,15 +1372,15 @@ with longevity_ranking:
         # 年齢でソート（降順、老齢から）
         all_df = all_df.sort_values('age', ascending=False)
         
-        # 上位20位を取得
-        top_20 = all_df.head(20)
+        # 上位50位を取得
+        top_50 = all_df.head(50)
         
-        if not top_20.empty:
-            st.write("### Top 20 Longest-Lived Individuals")
+        if not top_50.empty:
+            st.write("### Top 50 Longest-Lived Individuals")
             
             # ランキング表を作成
             ranking_data = []
-            for idx, row in top_20.iterrows():
+            for idx, row in top_50.iterrows():
                 rank = len(ranking_data) + 1
                 name = row['name']
                 age = row['age']

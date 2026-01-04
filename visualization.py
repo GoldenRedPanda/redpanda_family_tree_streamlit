@@ -24,9 +24,13 @@ def plot_genetic_distribution(df, ancestors):
     # Create a pie chart
     fig, ax = plt.subplots(figsize=(10, 8))
     if zoo_counts:
-        labels = list(zoo_counts.keys())
-        sizes = list(zoo_counts.values())
-        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90)
+        # 重みが大きい順にソート（降順）
+        sorted_zoo_counts = sorted(zoo_counts.items(), key=lambda x: x[1], reverse=True)
+        labels = [zoo for zoo, _ in sorted_zoo_counts]
+        sizes = [weight for _, weight in sorted_zoo_counts]
+        
+        # 時計回りで表示（重みが大きい順に時計回り）
+        ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, counterclock=False)
         ax.axis('equal')
         ax.set_title('Weighted Genetic Distribution of Oldest Ancestors')
     else:
