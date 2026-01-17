@@ -135,15 +135,87 @@ elif uploaded_file is not None:
 tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats, survival_timeline, longevity_ranking = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats", "Survival Timeline", "Longevity Ranking"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
+    show_moving_history = st.checkbox("Show Moving History", value=False)
     parent_depth = st.number_input("Parent Generation Depth", min_value=1, value=2)
     child_depth = st.number_input("Child Generation Depth", min_value=1, value=2)
     
     if data:
-        name_options = [person['name'] for person in data]
-        root_name = st.selectbox("Root Name", [""] + name_options)
+        # root_nameの初期化（session_stateを使用）
+        if 'selected_root_name' not in st.session_state:
+            st.session_state.selected_root_name = ""
         
-        # 引っ越し歴表示の切り替えボタン
-        show_moving_history = st.checkbox("Show Moving History", value=False)
+        # 個体をcur_zooでグループ化
+        zoo_groups = {}
+        for person in data:
+            cur_zoo = person.get('cur_zoo', '（不明）')
+            if cur_zoo == '' or pd.isna(cur_zoo):
+                cur_zoo = '（不明）'
+            
+            if cur_zoo not in zoo_groups:
+                zoo_groups[cur_zoo] = []
+            zoo_groups[cur_zoo].append(person)
+        
+        # 各グループ内で生年の早い順にソート（生年がない場合は最初に）
+        def get_birth_year(person):
+            birthdate_str = person.get('birthdate', '')
+            if birthdate_str:
+                try:
+                    birth_date = convert_date(birthdate_str)
+                    if birth_date:
+                        return birth_date.year
+                except:
+                    pass
+            return None
+        
+        for zoo in zoo_groups:
+            zoo_groups[zoo].sort(key=lambda p: (get_birth_year(p) is not None, get_birth_year(p) or 0))
+        
+        # Root Name選択セクション
+        st.write("### Select Root Name")
+        
+        # cur_zooでグルーピングしてfoldableな要素で表示
+        sorted_zoos = sorted(zoo_groups.keys())
+        
+        # セレクトボックスも残す（後方互換性のため）
+        all_names = [person['name'] for person in data]
+        selected_from_selectbox = st.selectbox("Root Name (Selectbox)", [""] + all_names, key="root_name_selectbox")
+        
+        # セレクトボックスの選択があれば、session_stateを更新
+        if selected_from_selectbox:
+            st.session_state.selected_root_name = selected_from_selectbox
+        
+        # グループ化された個体リストを表示
+        st.write("**Or select from grouped list:**")
+        for zoo in sorted_zoos:
+            with st.expander(f"{zoo} ({len(zoo_groups[zoo])} individuals)", expanded=False):
+                # カラムレイアウトでボタンを配置
+                cols_per_row = 3
+                for i in range(0, len(zoo_groups[zoo]), cols_per_row):
+                    cols = st.columns(cols_per_row)
+                    for j, col in enumerate(cols):
+                        idx = i + j
+                        if idx < len(zoo_groups[zoo]):
+                            person = zoo_groups[zoo][idx]
+                            name = person['name']
+                            birth_year = get_birth_year(person)
+                            
+                            # ボタンのラベル（名前と生年）
+                            if birth_year:
+                                label = f"{name} ({birth_year}年)"
+                            else:
+                                label = name
+                            
+                            # ボタンがクリックされた場合、session_stateを更新
+                            if col.button(label, key=f"root_name_btn_{zoo}_{idx}"):
+                                st.session_state.selected_root_name = name
+                                st.rerun()
+                            
+                            # 現在選択されている個体をハイライト
+                            if st.session_state.selected_root_name == name:
+                                col.info("✓ Selected")
+        
+        # 選択されたroot_nameを使用
+        root_name = st.session_state.selected_root_name
         
         mermaid_code = generate_mermaid(data, root_name if root_name else None, parent_depth, child_depth, show_images, show_moving_history)
         st.text_area("Generated Mermaid Code", mermaid_code, height=300)
