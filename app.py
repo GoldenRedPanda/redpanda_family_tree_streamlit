@@ -185,34 +185,34 @@ with tr:
             st.session_state.selected_root_name = selected_from_selectbox
         
         # グループ化された個体リストを表示
-        st.write("**Or select from grouped list:**")
-        for zoo in sorted_zoos:
-            with st.expander(f"{zoo} ({len(zoo_groups[zoo])} individuals)", expanded=False):
-                # カラムレイアウトでボタンを配置
-                cols_per_row = 3
-                for i in range(0, len(zoo_groups[zoo]), cols_per_row):
-                    cols = st.columns(cols_per_row)
-                    for j, col in enumerate(cols):
-                        idx = i + j
-                        if idx < len(zoo_groups[zoo]):
-                            person = zoo_groups[zoo][idx]
-                            name = person['name']
-                            birth_year = get_birth_year(person)
-                            
-                            # ボタンのラベル（名前と生年）
-                            if birth_year:
-                                label = f"{name} ({birth_year}年)"
-                            else:
-                                label = name
-                            
-                            # ボタンがクリックされた場合、session_stateを更新
-                            if col.button(label, key=f"root_name_btn_{zoo}_{idx}"):
-                                st.session_state.selected_root_name = name
-                                st.rerun()
-                            
-                            # 現在選択されている個体をハイライト
-                            if st.session_state.selected_root_name == name:
-                                col.info("✓ Selected")
+        #st.write("**Or select from grouped list:**")
+        #for zoo in sorted_zoos:
+        #    with st.expander(f"{zoo} ({len(zoo_groups[zoo])} individuals)", expanded=False):
+        #        # カラムレイアウトでボタンを配置
+        #        cols_per_row = 3
+        #        for i in range(0, len(zoo_groups[zoo]), cols_per_row):
+        #            cols = st.columns(cols_per_row)
+        #            for j, col in enumerate(cols):
+        #                idx = i + j
+        #                if idx < len(zoo_groups[zoo]):
+        #                    person = zoo_groups[zoo][idx]
+        #                    name = person['name']
+        #                    birth_year = get_birth_year(person)
+        #                    
+        #                    # ボタンのラベル（名前と生年）
+        #                    if birth_year:
+        #                        label = f"{name} ({birth_year}年)"
+        #                    else:
+        #                        label = name
+        #                    
+        #                    # ボタンがクリックされた場合、session_stateを更新
+        #                    if col.button(label, key=f"root_name_btn_{zoo}_{idx}"):
+        #                        st.session_state.selected_root_name = name
+        #                        st.rerun()
+        #                    
+        #                    # 現在選択されている個体をハイライト
+        #                    if st.session_state.selected_root_name == name:
+        #                        col.info("✓ Selected")
         
         # 選択されたroot_nameを使用
         root_name = st.session_state.selected_root_name
