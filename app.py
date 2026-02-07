@@ -1444,15 +1444,15 @@ with longevity_ranking:
         # 年齢でソート（降順、老齢から）
         all_df = all_df.sort_values('age', ascending=False)
         
-        # 上位50位を取得
-        top_50 = all_df.head(50)
+        # 上位100位を取得
+        top_100 = all_df.head(100)
         
-        if not top_50.empty:
-            st.write("### Top 50 Longest-Lived Individuals")
+        if not top_100.empty:
+            st.write("### Top 100 Longest-Lived Individuals")
             
             # ランキング表を作成
             ranking_data = []
-            for idx, row in top_50.iterrows():
+            for idx, row in top_100.iterrows():
                 rank = len(ranking_data) + 1
                 name = row['name']
                 age = row['age']
