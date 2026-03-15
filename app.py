@@ -1409,7 +1409,7 @@ with survival_timeline:
         st.warning("No data available for survival timeline analysis.")
 
 with longevity_ranking:
-    st.title("Longevity Ranking - Top 50 Individuals in Japan")
+    st.title("Longevity Ranking - Top 100 Individuals in Japan")
     
     # CSVファイルの読み込み
     if use_default and os.path.exists(default_csv_path):
