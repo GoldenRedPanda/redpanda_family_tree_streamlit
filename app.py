@@ -21,7 +21,8 @@ from data_processing import (
 )
 from genetic_analysis import (
     find_oldest_ancestors, get_gene_vector, calculate_genetic_distances,
-    get_opposite_gender_candidates, prepare_genetic_analysis_data
+    get_opposite_gender_candidates, prepare_genetic_analysis_data,
+    compute_pedigree_inbreeding,
 )
 from visualization import (
     plot_genetic_distribution, plot_distance_distribution, create_gantt_chart,
@@ -132,7 +133,7 @@ if use_default and os.path.exists(default_csv_path):
 elif uploaded_file is not None:
     data = read_csv(uploaded_file)
 
-tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats, survival_timeline, longevity_ranking = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats", "Survival Timeline", "Longevity Ranking"])
+tr, ppy, gantt, genetic, death_age, relationship, birthday, map_view, genetic_distance, birth_death_stats, survival_timeline, longevity_ranking, inbreeding_tab = st.tabs(["Family Tree", "Population Pyramid", "Gantt Chart", "Genetic Distribution", "Death Age Histogram", "Relationship Analysis", "Birthday Calendar", "Map View", "Genetic Distance", "Birth/Death Stats", "Survival Timeline", "Longevity Ranking", "近交係数"])
 with tr:
     show_images = st.checkbox("Show Images", value=False)
     show_moving_history = st.checkbox("Show Moving History", value=False)
@@ -1591,4 +1592,76 @@ with longevity_ranking:
             st.warning("No individuals found for longevity ranking.")
     else:
         st.warning("No data available for longevity ranking analysis.")
+
+with inbreeding_tab:
+    st.title("近交係数（Inbreeding coefficient）")
+
+    if use_default and os.path.exists(default_csv_path):
+        df_ib = pd.read_csv(default_csv_path)
+    elif uploaded_file is not None:
+        df_ib = pd.read_csv(uploaded_file)
+    else:
+        df_ib = None
+
+    if df_ib is None or df_ib.shape[0] == 0:
+        st.warning("CSV を読み込めません。ホームまたは他タブと同様に既定ファイル／アップロードをご利用ください。")
+    elif "father" not in df_ib.columns or "mother" not in df_ib.columns:
+        st.error("データに father / mother 列がある必要があります。")
+    else:
+        st.markdown(
+            "血統ファイルの親子関係（父・母）から加法的関係行列で Wright の **F** を算出しています。"
+            " 係数計算自体は全集団の血統を用います（海外・死亡親の情報も親縁として反映されます）。"
+            " 一覧は **現在生存し、現所属園が日本（外国園除外）にある個体** に限定しています。"
+            " 表示順は **F が大きい順（同一条件の上位50件）** です。"
+        )
+        coef_df = compute_pedigree_inbreeding(df_ib)
+        if coef_df.empty:
+            st.warning("算出対象となる個体が見つかりませんでした。")
+        else:
+            elig_keys = df_ib.assign(
+                _dd=pd.to_datetime(df_ib["deaddate"].apply(convert_date)),
+                join_key=df_ib["name"].apply(clean_name),
+            )
+            allowed_keys = set(
+                elig_keys[
+                    elig_keys["_dd"].isna()
+                    & ~elig_keys["cur_zoo"].isin(get_foreign_zoos())
+                ]["join_key"].unique()
+            )
+
+            meta = df_ib[["name", "gender", "cur_zoo"]].copy()
+            meta["join_name"] = meta["name"].apply(clean_name)
+            meta = meta.drop_duplicates(subset="join_name", keep="last")
+            merged = coef_df.merge(
+                meta[["join_name", "gender", "cur_zoo"]],
+                left_on="name",
+                right_on="join_name",
+                how="left",
+            ).drop(columns=["join_name"])
+
+            merged = merged[merged["name"].isin(allowed_keys)].sort_values(
+                "inbreeding_coef", ascending=False
+            )
+            if merged.empty:
+                st.warning(
+                    "日本国内に生存している個体で、一覧に載るものが見つかりませんでした。"
+                )
+            else:
+                top50 = merged.head(50).copy()
+                top50.insert(0, "順位", range(1, len(top50) + 1))
+                top50["近交係数 F"] = top50["inbreeding_coef"].map(lambda x: f"{x:.6f}")
+                show = top50[
+                    ["順位", "name", "近交係数 F", "sire", "dam", "gender", "cur_zoo"]
+                ].rename(
+                    columns={
+                        "name": "個体名",
+                        "sire": "父",
+                        "dam": "母",
+                        "gender": "性別",
+                        "cur_zoo": "現所属園",
+                    }
+                )
+
+                st.write("### Top 50（生存・日本園の個体、近交係数の高い順）")
+                st.dataframe(show, use_container_width=True, hide_index=True)
 
