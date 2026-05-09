@@ -1057,9 +1057,28 @@ with map_view:
         st.write("### 動物園別個体数ランキング")
         zoo_counts = {zoo: len(individuals) for zoo, individuals in zoo_individuals.items()}
         sorted_zoos = sorted(zoo_counts.items(), key=lambda x: x[1], reverse=True)
-        
+
+        def format_ranking_names(individuals):
+            males = [ind["name"] for ind in individuals if ind.get("gender") == "オス"]
+            females = [ind["name"] for ind in individuals if ind.get("gender") == "メス"]
+            other = [
+                ind["name"]
+                for ind in individuals
+                if ind.get("gender") not in ("オス", "メス")
+            ]
+            parts = []
+            if males:
+                parts.append(f"オス: {'、'.join(males)}")
+            if females:
+                parts.append(f"メス: {'、'.join(females)}")
+            if other:
+                parts.append("、".join(other))
+            return "　".join(parts) if parts else ""
+
         for i, (zoo, count) in enumerate(sorted_zoos, 1):
-            st.write(f"{i}. {zoo}: {count}個体")
+            names_txt = format_ranking_names(zoo_individuals[zoo])
+            suffix = f" — {names_txt}" if names_txt else ""
+            st.write(f"{i}. {zoo}: {count}個体{suffix}")
         
         # マーカーの色の説明
         st.write("### マーカーの色の意味")
