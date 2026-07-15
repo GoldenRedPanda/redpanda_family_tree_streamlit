@@ -7,8 +7,6 @@ from datetime import datetime, date, timedelta
 import os
 from streamlit_mermaid import st_mermaid
 from streamlit_calendar import calendar
-import folium
-from streamlit_folium import st_folium
 
 # Import our custom modules
 from utils import (
