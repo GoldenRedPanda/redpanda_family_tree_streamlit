@@ -159,7 +159,7 @@ def get_year_range(person):
 
 def get_foreign_zoos():
     """Get list of foreign zoos to exclude from Japan-based analysis"""
-    return ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'メキシコ']
+    return ['中国', '台湾', 'カナダ', 'アメリカ', 'チリ', '韓国', 'インドネシア', 'アルゼンチン', 'タイ', 'シンガポール', 'メキシコ']
 
 
 def filter_japan_living_individuals(df):
